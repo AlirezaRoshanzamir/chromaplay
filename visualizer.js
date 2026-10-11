@@ -138,7 +138,10 @@ export class HarmonicaVisualizer {
     const lineY = Math.max(top + 10, h - 21);
     const laneWidth = Math.max(1, (w - left - right) / 12);
     const fieldWidth = laneWidth * 12;
-    const beatHeight = Math.max(1, (lineY - top) / this.visibleBeats);
+    // Keep a sixteenth-note slot at least 15px high, so shrinking the canvas
+    // shows less time instead of squeezing consecutive labels together.
+    const beatHeight = Math.max(60, (lineY - top) / this.visibleBeats);
+    const visibleBeats = (lineY - top) / beatHeight;
     const yForBeat = (beat) => lineY - (beat - this.beat) * beatHeight;
     this.hitAreas = [];
 
@@ -170,7 +173,7 @@ export class HarmonicaVisualizer {
     ctx.stroke();
 
     const earliest = Math.max(0, Math.floor(this.beat));
-    const latest = this.beat + this.visibleBeats + 1;
+    const latest = this.beat + visibleBeats + 1;
     for (let beat = earliest; beat <= latest; beat += 1) {
       const y = yForBeat(beat);
       ctx.beginPath();
@@ -201,7 +204,10 @@ export class HarmonicaVisualizer {
       const highlighted = active || (this.activeNote && (note.source === this.activeNote || (note.source.id != null && note.source.id === this.activeNote.id)));
 
       if (note.isRest) {
-        this.drawRest(ctx, note, left, Math.min(bottom - 7, lineY - 10), fieldWidth, top, lineY, highlighted);
+        const restTop = Math.max(blockTop, top);
+        const restBottom = Math.min(bottom, lineY);
+        const labelY = Math.max(top + 5, Math.min(lineY - 5, (restTop + restBottom) / 2));
+        this.drawRest(ctx, note, left, labelY, fieldWidth, top, lineY, highlighted);
         continue;
       }
       if (note.hole < 1 || note.hole > 12) continue;
@@ -237,8 +243,8 @@ export class HarmonicaVisualizer {
       }
 
       const available = visibleBottom - visibleTop;
-      if (available >= 17 && blockWidth >= 15) {
-        const labelY = Math.min(visibleBottom - 11, Math.max(visibleTop + 13, (visibleTop + visibleBottom) / 2));
+      if (available > 0 || active) {
+        const labelY = Math.max(top + 6, Math.min(lineY - 6, (visibleTop + visibleBottom) / 2));
         this.drawNoteLabel(ctx, x, labelY, blockWidth, note, color, available);
       }
       ctx.restore();
@@ -286,14 +292,17 @@ export class HarmonicaVisualizer {
 
   drawNoteLabel(ctx, x, y, width, note, color, height) {
     const compact = width < 32;
+    const short = height < 17;
+    const fontSize = short ? 9 : compact ? 10 : 12;
     const center = x + width / 2;
     ctx.fillStyle = color;
     ctx.strokeStyle = color;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.globalAlpha = 1;
-    ctx.font = `600 ${compact ? 10 : 12}px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`;
-    ctx.fillText(`${note.hole}${note.slider ? '#' : ''}`, center + (compact ? 0 : 4), y);
+    ctx.font = `600 ${fontSize}px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`;
+    const label = `${compact ? note.draw ? '-' : '+' : ''}${note.hole}${note.slider ? '#' : ''}`;
+    ctx.fillText(label, center + (compact ? 0 : 4), y, Math.max(1, width - (compact ? 3 : 13)));
     if (!compact) {
       const arrowX = center - (note.slider ? 12 : 9);
       const direction = note.draw ? 1 : -1;
@@ -307,20 +316,11 @@ export class HarmonicaVisualizer {
       ctx.lineCap = 'round';
       ctx.lineJoin = 'round';
       ctx.stroke();
-    } else if (height > 37) {
-      const direction = note.draw ? 1 : -1;
-      const arrowY = y - 13;
-      ctx.beginPath();
-      ctx.moveTo(center - 2.5, arrowY - direction * 1.5);
-      ctx.lineTo(center, arrowY + direction * 1.5);
-      ctx.lineTo(center + 2.5, arrowY - direction * 1.5);
-      ctx.lineWidth = 1.2;
-      ctx.stroke();
     }
   }
 
   drawRest(ctx, note, x, y, width, top, bottom, active) {
-    if (y < top + 7 || y > bottom) return;
+    if (y < top + 5 || y > bottom - 5) return;
     ctx.save();
     ctx.globalAlpha = active ? 0.9 : 0.55;
     ctx.strokeStyle = '#8ba498';

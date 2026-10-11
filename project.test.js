@@ -13,6 +13,8 @@ test('the default warm-up has 32 quarter beats and the requested settings', () =
   assert.equal(DEFAULT_PROJECT.backgroundOffset, 0);
   assert.equal(DEFAULT_PROJECT.noteVolume, 70);
   assert.equal(DEFAULT_PROJECT.backgroundVolume, 65);
+  assert.equal(DEFAULT_PROJECT.noteMuted, false);
+  assert.equal(DEFAULT_PROJECT.backgroundMuted, false);
   assert.equal(DEFAULT_PROJECT.metronome, false);
   assert.equal(DEFAULT_PROJECT.loop, false);
 });
@@ -28,6 +30,8 @@ test('JSON and .chroma round trips retain settings but never background audio', 
     backgroundOffset: -2.125,
     noteVolume: 12,
     backgroundVolume: 81,
+    noteMuted: true,
+    backgroundMuted: true,
     metronome: true,
     loop: true,
   };
@@ -115,7 +119,7 @@ test('numeric settings reject nonnumeric, nonfinite, out-of-range, and fractiona
 });
 
 test('text and boolean fields enforce strict types and size limits', () => {
-  for (const field of ['metronome', 'loop']) {
+  for (const field of ['metronome', 'loop', 'noteMuted', 'backgroundMuted']) {
     for (const value of ['false', 0, 1, null]) {
       assert.throws(() => validateProject({ ...DEFAULT_PROJECT, [field]: value }));
     }
@@ -129,4 +133,24 @@ test('text and boolean fields enforce strict types and size limits', () => {
 test('UTF-8 byte-order marks are accepted in text and JSON files', () => {
   assert.equal(parseProjectFile('\uFEFF1q', 'notes.txt').notation, '1q');
   assert.deepEqual(parseProjectFile(`\uFEFF${serializeProject(DEFAULT_PROJECT)}`, 'notes.chroma'), DEFAULT_PROJECT);
+});
+
+test('old projects and plain-text imports start with both channels unmuted', () => {
+  const { noteMuted, backgroundMuted, ...oldProject } = DEFAULT_PROJECT;
+  const restored = validateProject(oldProject);
+  assert.equal(restored.noteMuted, false);
+  assert.equal(restored.backgroundMuted, false);
+  for (const imported of [parseProjectFile(JSON.stringify(oldProject), 'old.chroma'), parseProjectFile('1q -1q', 'melody.txt')]) {
+    assert.equal(imported.noteMuted, false);
+    assert.equal(imported.backgroundMuted, false);
+  }
+});
+
+test('each mute combination survives export and import independently of volume', () => {
+  for (const noteMuted of [false, true]) {
+    for (const backgroundMuted of [false, true]) {
+      const project = { ...DEFAULT_PROJECT, noteMuted, backgroundMuted, noteVolume: 36, backgroundVolume: 82 };
+      assert.deepEqual(parseProjectFile(serializeProject(project), 'mix.chroma'), project);
+    }
+  }
 });

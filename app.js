@@ -19,6 +19,7 @@ const icons = {
   headphones:'<path d="M3 14v-3a9 9 0 0 1 18 0v3M3 13h4v8H5a2 2 0 0 1-2-2Zm18 0h-4v8h2a2 2 0 0 0 2-2Z"/>',
   audio:'<path d="M12 3v18M8 7v10M4 10v4m12-7v10m4-7v4"/>',
   volume:'<path d="m11 4-6 5H2v6h3l6 5Zm4 4a6 6 0 0 1 0 8m3-11a10 10 0 0 1 0 14"/>',
+  muted:'<path d="m11 4-6 5H2v6h3l6 5ZM16 9l6 6m0-6-6 6"/>',
   lock:'<rect x="5" y="10" width="14" height="11" rx="2"/><path d="M8 10V6a4 4 0 0 1 8 0v4m-4 5v2"/>',
   close:'<path d="m6 6 12 12M6 18 18 6"/>', check:'<path d="m5 12 4 4L19 6"/>',
   pencil:'<path d="m16 3 5 5-12 12-6 1 1-6Zm-3 3 5 5"/>',
@@ -50,6 +51,51 @@ const audio = new PracticeAudio({
   onEnded: () => { position = parsed.totalBeats; renderPosition(); if (project.loop) { position = 0; void startPlayback(true); } },
 });
 const visualizer = new HarmonicaVisualizer($('visualizer'), { onSeek: beat => { void seekTo(beat); } });
+const VISUALIZER_HEIGHT_KEY = 'chromaplay.visualizerHeight.v1';
+const resizeHandle = $('visualizer-resize');
+function applyVisualizerHeight(value) {
+  const height = Math.min(640, Math.max(180, Math.round(Number(value) || 320)));
+  resizeHandle.setAttribute('aria-valuenow', height);
+  resizeHandle.setAttribute('aria-valuetext', `${height} pixels`);
+  $('visualizer').parentElement.style.setProperty('--visualizer-height', `${height}px`);
+}
+try { applyVisualizerHeight(localStorage.getItem(VISUALIZER_HEIGHT_KEY)); }
+catch { applyVisualizerHeight(320); }
+function saveVisualizerHeight() {
+  try { localStorage.setItem(VISUALIZER_HEIGHT_KEY, resizeHandle.getAttribute('aria-valuenow')); }
+  catch { /* The height still works when browser storage is unavailable. */ }
+}
+let resizing = null;
+resizeHandle.addEventListener('pointerdown', event => {
+  if (event.button !== 0 || resizing) return;
+  event.preventDefault();
+  resizeHandle.focus({ preventScroll: true });
+  resizing = { pointerId: event.pointerId, y: event.clientY, height: $('visualizer').getBoundingClientRect().height };
+  resizeHandle.setPointerCapture(event.pointerId);
+  document.body.classList.add('resizing-visualizer');
+});
+resizeHandle.addEventListener('pointermove', event => {
+  if (resizing?.pointerId !== event.pointerId) return;
+  applyVisualizerHeight(resizing.height + event.clientY - resizing.y);
+});
+function finishVisualizerResize(event) {
+  if (!resizing || (event.pointerId != null && event.pointerId !== resizing.pointerId)) return;
+  const { pointerId } = resizing;
+  resizing = null;
+  if (resizeHandle.hasPointerCapture(pointerId)) resizeHandle.releasePointerCapture(pointerId);
+  document.body.classList.remove('resizing-visualizer');
+  saveVisualizerHeight();
+}
+['pointerup', 'pointercancel', 'lostpointercapture'].forEach(name => resizeHandle.addEventListener(name, finishVisualizerResize));
+window.addEventListener('blur', finishVisualizerResize);
+resizeHandle.addEventListener('keydown', event => {
+  const height = Number(resizeHandle.getAttribute('aria-valuenow'));
+  const next = { ArrowUp: height - 10, ArrowDown: height + 10, Home: 180, End: 640 }[event.key];
+  if (next === undefined) return;
+  event.preventDefault();
+  applyVisualizerHeight(next);
+  saveVisualizerHeight();
+});
 const noteEditor = new NoteEditor($('note-editor'), {
   onEditStart: () => { if (audio.isPlaying || pendingPlay) pausePlayback(); },
   onChange: source => { stopForEdit(); project.notation = source; refreshScore(); save(); },
@@ -115,9 +161,12 @@ function applyProject() {
   $('loop').setAttribute('aria-pressed', String(project.loop));
   audio.setNoteVolume(project.noteVolume / 100);
   audio.setBackgroundVolume(project.backgroundVolume / 100);
+  audio.setNoteMuted(project.noteMuted);
+  audio.setBackgroundMuted(project.backgroundMuted);
   audio.setMetronome(project.metronome);
   audio.setTimeSignature(project.numerator, project.denominator);
   updateVolumes();
+  updateMutes();
   refreshScore();
 }
 function refreshScore() {
@@ -284,6 +333,18 @@ $('background-offset').addEventListener('input', () => { if ($('background-offse
 $('background-offset').addEventListener('change', setOffset);
 $('metronome').addEventListener('click', () => { project.metronome = !project.metronome; audio.setMetronome(project.metronome); $('metronome').setAttribute('aria-pressed', String(project.metronome)); save(); });
 $('loop').addEventListener('click', () => { project.loop = !project.loop; $('loop').setAttribute('aria-pressed', String(project.loop)); save(); });
+function updateMutes() {
+  for (const [type, label] of [['note', 'Notes'], ['background', 'Backing track']]) {
+    const muted = project[`${type}Muted`];
+    const button = $(`${type}-mute`);
+    button.setAttribute('aria-pressed', String(muted));
+    button.querySelector('[data-mute-icon]').innerHTML = icon(muted ? 'muted' : 'volume');
+    button.querySelector('.mute-state').textContent = muted ? 'Muted' : 'On';
+    button.title = `${muted ? 'Unmute' : 'Mute'} ${label.toLowerCase()}${type === 'note' ? ' and metronome' : ''}`;
+  }
+}
+$('note-mute').addEventListener('click', () => { project.noteMuted = !project.noteMuted; audio.setNoteMuted(project.noteMuted); updateMutes(); save(); });
+$('background-mute').addEventListener('click', () => { project.backgroundMuted = !project.backgroundMuted; audio.setBackgroundMuted(project.backgroundMuted); updateMutes(); save(); });
 function updateVolumes() {
   ['note','background'].forEach(type => { $(`${type}-volume-value`).textContent = `${$(`${type}-volume`).value}%`; setRangeFill($(`${type}-volume`)); });
 }

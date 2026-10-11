@@ -19,6 +19,8 @@ export class PracticeAudio {
     this.background = null;
     this.noteVolume = 0.7;
     this.backgroundVolume = 0.65;
+    this.noteMuted = false;
+    this.backgroundMuted = false;
     this.metronomeEnabled = false;
     this.numerator = 4;
     this.denominator = 4;
@@ -45,9 +47,9 @@ export class PracticeAudio {
     this._noteGain = context.createGain();
     this._backgroundGain = context.createGain();
     this._clickGain = context.createGain();
-    this._noteGain.gain.value = this.noteVolume;
-    this._backgroundGain.gain.value = this.backgroundVolume;
-    this._clickGain.gain.value = 0.65;
+    this._noteGain.gain.value = this.noteMuted ? 0 : this.noteVolume;
+    this._backgroundGain.gain.value = this.backgroundMuted ? 0 : this.backgroundVolume;
+    this._clickGain.gain.value = this.noteMuted ? 0 : 0.65;
     this._noteGain.connect(context.destination);
     this._backgroundGain.connect(context.destination);
     this._clickGain.connect(context.destination);
@@ -172,12 +174,23 @@ export class PracticeAudio {
 
   setNoteVolume(value) {
     this.noteVolume = clampVolume(value);
-    this._setGain(this._noteGain, this.noteVolume);
+    this._setGain(this._noteGain, this.noteMuted ? 0 : this.noteVolume);
   }
 
   setBackgroundVolume(value) {
     this.backgroundVolume = clampVolume(value);
-    this._setGain(this._backgroundGain, this.backgroundVolume);
+    this._setGain(this._backgroundGain, this.backgroundMuted ? 0 : this.backgroundVolume);
+  }
+
+  setNoteMuted(muted) {
+    this.noteMuted = Boolean(muted);
+    this._setGain(this._noteGain, this.noteMuted ? 0 : this.noteVolume);
+    this._setGain(this._clickGain, this.noteMuted ? 0 : 0.65);
+  }
+
+  setBackgroundMuted(muted) {
+    this.backgroundMuted = Boolean(muted);
+    this._setGain(this._backgroundGain, this.backgroundMuted ? 0 : this.backgroundVolume);
   }
 
   setMetronome(enabled) {

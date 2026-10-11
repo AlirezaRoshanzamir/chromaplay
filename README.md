@@ -4,14 +4,19 @@ A browser app for practicing a 12-hole chromatic harmonica. Write a melody in si
 
 **[Open ChromaPlay](https://alirezaroshanzamir.github.io/chromaplay/)**
 
+![ChromaPlay showing the falling-note visualizer, 12 playable harmonica holes, and playback controls](docs/screenshots/practice.jpg)
+
+Follow the falling notes or play the harmonica directly with your mouse and keyboard.
+
 ## Features
 
 - A simple notation language for holes, blow/draw, the slider, note lengths, and rests.
 - An inline score editor with duration-sized note boxes, breath colors, and a moving playhead.
-- A falling-note visualizer across all 12 holes, synchronized with synthesized audio.
+- A falling-note visualizer across all 12 holes, with adjustable height and labels for short notes.
 - Adjustable tempo and time signature, a metronome, looping, seeking, and note-by-note navigation.
 - A playable harmonica with mouse, touch, and keyboard controls.
 - Local backing tracks with separate volume and positive or negative start offsets.
+- Independent mute controls for notes and backing audio, available during playback.
 - Plain-text copying, score import/export, and browser autosave.
 
 ChromaPlay is a static HTML, CSS, and JavaScript app. It has no application backend, account system, or third-party JavaScript dependencies.
@@ -98,6 +103,10 @@ Box width follows duration: a whole note is twice as wide as a half note, and a 
 
 Blow notes are green, draw notes are red, and higher hole numbers use darker shades. Rests are gray. During playback, a vertical playhead moves through the boxes and the editor scrolls to the current note.
 
+![The inline score editor with colored note boxes, duration-based widths, and explicit line breaks](docs/screenshots/score-editor.jpg)
+
+Click a note box to edit its text. Use `L` to keep a phrase on its own row.
+
 ## Playing the harmonica
 
 Click or tap a hole to hear it. Hold the mouse button or a hole key to sustain a note. The default is blow with the slider out.
@@ -119,7 +128,7 @@ When several hole keys are held, the last one pressed sounds. Releasing it retur
 
 These shortcuts stay inactive while typing in the editor or other fields, or while the notation guide is open. They do not override Ctrl/Command or Alt shortcuts. Leaving the tab or window stops a held note.
 
-Manual playing works with an empty score and uses the **Notes** volume. It pauses score playback while keeping the current position.
+Manual playing works with an empty score and uses the **Notes** volume and mute setting. It pauses score playback while keeping the current position.
 
 ### Tuning and sound
 
@@ -137,11 +146,27 @@ Use **Previous** and **Next** to move through notes and rests, **Restart** to re
 
 Right Arrow moves to the next note and Home restarts when focus is outside the editor, inputs, buttons, and other controls, and the guide is closed. Space is the draw modifier, not a playback shortcut.
 
+### Adjusting the visualizer
+
+Drag the horizontal handle at the bottom of the visualization card up or down to resize the visualizer from **180 to 640 pixels** tall. ChromaPlay remembers this display preference in your browser, separately from the score.
+
+Short notes keep their hole and slider labels, using a smaller font when needed. The visible time window adjusts with the visualizer height to keep those notes readable.
+
+### Muting during playback
+
+The **Notes** and **Backing track** mute buttons below the progress bar work independently. Keep both audible, mute either one, or mute both for silent visual practice. You can change either setting during playback without moving the playhead or changing the saved volume levels.
+
+Muting notes also silences the metronome and manually played holes. The mute settings autosave with the score and are included in exported projects. Older projects open with both parts unmuted.
+
 ## Backing tracks
 
 Choose a local audio file or drop it on the upload area. Supported formats depend on your browser; MP3 and WAV are good starting points. Files can be up to **100 MB**.
 
-Track and note volumes are separate, so you can mute the synthesized notes while following the visualizer. The audio file plays at its original speed; changing the score tempo does not stretch the track.
+Track and note volumes are separate. Use the playback mute buttons to silence either part without losing its volume setting. The audio file plays at its original speed; changing the score tempo does not stretch the track.
+
+![Backing track controls for choosing an audio file, setting its start offset, and adjusting the mix](docs/screenshots/backing-track.jpg)
+
+Choose a track from your device and adjust its timing to match the score.
 
 Track offset is measured in seconds relative to the first note, from **-600 to 600**:
 
@@ -157,7 +182,7 @@ A negative offset provides a lead-in when playing from the beginning or restarti
 
 The current score and settings autosave to this browser's local storage, including unfinished notation. Storage belongs to the browser and site address. Clearing browser data removes it, and scores saved at another ChromaPlay address do not appear here automatically. Use export/import to move them.
 
-- **Export score** downloads a `.chroma.json` file with the title, notation, tempo, time signature, track offset, volumes, metronome, and loop settings.
+- **Export score** downloads a `.chroma.json` file with the title, notation, tempo, time signature, track offset, volumes, mute settings, metronome, and loop settings.
 - **Import** accepts `.json` and `.chroma` projects, or `.txt` notation. Text imports use default settings and the filename as the title.
 - Imports validate notation and settings before replacing the score. Score files are limited to **1 MB**, and notation to **100,000 characters**.
 

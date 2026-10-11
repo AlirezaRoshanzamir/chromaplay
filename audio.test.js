@@ -188,6 +188,74 @@ test('empty scores do not start audio, and backing offsets do not create lead-in
   assert.equal(audio.getPosition(), 0);
 });
 
+test('mute combinations change live sound without stopping or seeking either channel', async t => {
+  const audio = makeAudio(t);
+  audio.setMetronome(true);
+  await addBackground(audio);
+  await audio.play({ notes: score, bpm: 120 });
+  const context = audio._context;
+  context.currentTime = 0.535;
+  const sources = [...context.nodes];
+  const stops = sources.map(source => [...source.stops]);
+  const startTime = audio._startTime;
+  const endTime = audio._endTime;
+  for (const [noteMuted, backgroundMuted] of [[true, false], [false, true], [true, true], [false, false]]) {
+    audio.setNoteMuted(noteMuted);
+    audio.setBackgroundMuted(backgroundMuted);
+    assert.equal(audio._noteGain.gain.events.at(-1).value, noteMuted ? 0 : 0.7);
+    assert.equal(audio._clickGain.gain.events.at(-1).value, noteMuted ? 0 : 0.65);
+    assert.equal(audio._backgroundGain.gain.events.at(-1).value, backgroundMuted ? 0 : 0.65);
+    assert.equal(audio.isPlaying, true);
+    assert.equal(audio.metronomeEnabled, true);
+    assert.equal(audio._startTime, startTime);
+    assert.equal(audio._endTime, endTime);
+    close(audio.getPosition(), 1);
+    assert.deepEqual(context.nodes, sources);
+    assert.deepEqual(sources.map(source => source.stops), stops);
+  }
+  audio.setNoteMuted(true);
+  audio.setBackgroundMuted(true);
+  context.currentTime = 0.785;
+  close(audio.getPosition(), 1.5);
+});
+
+test('muting before audio starts is honored and changing muted volumes stays silent', async t => {
+  const audio = makeAudio(t);
+  audio.setNoteMuted(true);
+  audio.setBackgroundMuted(true);
+  audio.setNoteVolume(0.3);
+  audio.setBackgroundVolume(0.8);
+  assert.equal(audio._context, null);
+  await addBackground(audio);
+  await audio.play({ notes: score, bpm: 120 });
+  assert.equal(audio._noteGain.gain.value, 0);
+  assert.equal(audio._clickGain.gain.value, 0);
+  assert.equal(audio._backgroundGain.gain.value, 0);
+  audio.setNoteVolume(0.45);
+  audio.setBackgroundVolume(0.9);
+  assert.equal(audio._noteGain.gain.events.at(-1).value, 0);
+  assert.equal(audio._backgroundGain.gain.events.at(-1).value, 0);
+  assert.equal(audio.noteVolume, 0.45);
+  assert.equal(audio.backgroundVolume, 0.9);
+  audio.setNoteMuted(false);
+  audio.setBackgroundMuted(false);
+  assert.equal(audio._noteGain.gain.events.at(-1).value, 0.45);
+  assert.equal(audio._clickGain.gain.events.at(-1).value, 0.65);
+  assert.equal(audio._backgroundGain.gain.events.at(-1).value, 0.9);
+});
+
+test('notes mute controls an already held manual note without restarting it', async t => {
+  const audio = makeAudio(t);
+  await audio.startManualNote(60);
+  const voice = audio._manualVoice;
+  audio.setNoteMuted(true);
+  assert.equal(audio._noteGain.gain.events.at(-1).value, 0);
+  audio.setNoteMuted(false);
+  assert.equal(audio._noteGain.gain.events.at(-1).value, 0.7);
+  assert.equal(audio._manualVoice, voice);
+  assert.equal(voice.source.stops.length, 0);
+});
+
 test('manual notes sustain the requested pitch through the shared note volume without moving the score', async t => {
   const audio = makeAudio(t);
   await audio.play({ notes: score, bpm: 120, fromBeat: 1 });

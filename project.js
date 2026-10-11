@@ -15,6 +15,8 @@ export const DEFAULT_PROJECT = Object.freeze({
   backgroundOffset: 0,
   noteVolume: 70,
   backgroundVolume: 65,
+  noteMuted: false,
+  backgroundMuted: false,
   metronome: false,
   loop: false,
 });
@@ -62,9 +64,10 @@ export function validateProject(input, { allowInvalidNotation = false } = {}) {
   checkNumber(project.backgroundOffset, 'Background offset', -600, 600);
   checkNumber(project.noteVolume, 'Note volume', 0, 100);
   checkNumber(project.backgroundVolume, 'Background volume', 0, 100);
-  for (const field of ['metronome', 'loop']) {
+  const booleanLabels = { metronome: 'Metronome', loop: 'Loop', noteMuted: 'Notes mute', backgroundMuted: 'Backing track mute' };
+  for (const [field, label] of Object.entries(booleanLabels)) {
     if (typeof project[field] !== 'boolean') {
-      throw new Error(`${field === 'loop' ? 'Loop' : 'Metronome'} must be true or false.`);
+      throw new Error(`${label} must be true or false.`);
     }
   }
 
