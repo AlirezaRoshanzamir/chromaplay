@@ -19,7 +19,6 @@ const icons = {
   headphones:'<path d="M3 14v-3a9 9 0 0 1 18 0v3M3 13h4v8H5a2 2 0 0 1-2-2Zm18 0h-4v8h2a2 2 0 0 0 2-2Z"/>',
   audio:'<path d="M12 3v18M8 7v10M4 10v4m12-7v10m4-7v4"/>',
   volume:'<path d="m11 4-6 5H2v6h3l6 5Zm4 4a6 6 0 0 1 0 8m3-11a10 10 0 0 1 0 14"/>',
-  muted:'<path d="m11 4-6 5H2v6h3l6 5ZM16 9l6 6m0-6-6 6"/>',
   lock:'<rect x="5" y="10" width="14" height="11" rx="2"/><path d="M8 10V6a4 4 0 0 1 8 0v4m-4 5v2"/>',
   close:'<path d="m6 6 12 12M6 18 18 6"/>', check:'<path d="m5 12 4 4L19 6"/>',
   pencil:'<path d="m16 3 5 5-12 12-6 1 1-6Zm-3 3 5 5"/>',
@@ -159,13 +158,10 @@ function applyProject() {
   $('loop').setAttribute('aria-pressed', String(project.loop));
   audio.setNoteVolume(project.noteVolume / 100);
   audio.setBackgroundVolume(project.backgroundVolume / 100);
-  audio.setNoteMuted(project.noteMuted);
-  audio.setBackgroundMuted(project.backgroundMuted);
   audio.setMetronome(project.metronome);
   $('instrument').value = project.instrument;
   void selectInstrument();
   updateVolumes();
-  updateMutes();
   refreshScore();
 }
 function refreshScore() {
@@ -370,18 +366,6 @@ $('background-offset').addEventListener('input', () => { if ($('background-offse
 $('background-offset').addEventListener('change', setOffset);
 $('metronome').addEventListener('click', () => { project.metronome = !project.metronome; audio.setMetronome(project.metronome); $('metronome').setAttribute('aria-pressed', String(project.metronome)); save(); });
 $('loop').addEventListener('click', () => { project.loop = !project.loop; $('loop').setAttribute('aria-pressed', String(project.loop)); save(); });
-function updateMutes() {
-  for (const [type, label] of [['note', 'Notes'], ['background', 'Backing track']]) {
-    const muted = project[`${type}Muted`];
-    const button = $(`${type}-mute`);
-    button.setAttribute('aria-pressed', String(muted));
-    button.querySelector('[data-mute-icon]').innerHTML = icon(muted ? 'muted' : 'volume');
-    button.querySelector('.mute-state').textContent = muted ? 'Muted' : 'On';
-    button.title = `${muted ? 'Unmute' : 'Mute'} ${label.toLowerCase()}${type === 'note' ? ' and metronome' : ''}`;
-  }
-}
-$('note-mute').addEventListener('click', () => { project.noteMuted = !project.noteMuted; audio.setNoteMuted(project.noteMuted); updateMutes(); save(); });
-$('background-mute').addEventListener('click', () => { project.backgroundMuted = !project.backgroundMuted; audio.setBackgroundMuted(project.backgroundMuted); updateMutes(); save(); });
 function updateVolumes() {
   ['note','background'].forEach(type => { $(`${type}-volume-value`).textContent = `${$(`${type}-volume`).value}%`; setRangeFill($(`${type}-volume`)); });
 }

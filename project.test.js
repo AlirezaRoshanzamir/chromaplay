@@ -34,8 +34,8 @@ test('JSON and .chroma round trips retain settings but never background audio', 
     backgroundOffset: -2.125,
     noteVolume: 12,
     backgroundVolume: 81,
-    noteMuted: true,
-    backgroundMuted: true,
+    noteMuted: false,
+    backgroundMuted: false,
     metronome: true,
     loop: true,
   };
@@ -145,11 +145,40 @@ test('old projects and plain-text imports start with both channels unmuted', () 
   }
 });
 
-test('each mute combination survives export and import independently of volume', () => {
+test('each legacy mute combination becomes a visible zero volume with no hidden mute flag', () => {
   for (const noteMuted of [false, true]) {
     for (const backgroundMuted of [false, true]) {
       const project = { ...DEFAULT_PROJECT, noteMuted, backgroundMuted, noteVolume: 36, backgroundVolume: 82 };
-      assert.deepEqual(parseProjectFile(serializeProject(project), 'mix.chroma'), project);
+      const expected = {
+        ...project,
+        noteVolume: noteMuted ? 0 : 36,
+        backgroundVolume: backgroundMuted ? 0 : 82,
+        noteMuted: false,
+        backgroundMuted: false,
+      };
+      assert.deepEqual(validateProject(project, { allowInvalidNotation: true }), expected);
+      assert.deepEqual(parseProjectFile(JSON.stringify(project), 'old-mix.chroma'), expected);
+      assert.deepEqual(parseProjectFile(serializeProject(project), 'mix.chroma'), expected);
+    }
+  }
+});
+
+test('migrated mute volumes remain editable and never restore a hidden mute on save or export', () => {
+  const restored = validateProject({ ...DEFAULT_PROJECT, noteMuted: true, backgroundMuted: true });
+  assert.equal(restored.noteVolume, 0);
+  assert.equal(restored.backgroundVolume, 0);
+  const adjusted = { ...restored, noteVolume: 42, backgroundVolume: 73 };
+  assert.deepEqual(validateProject(adjusted), adjusted);
+  assert.deepEqual(parseProjectFile(serializeProject(adjusted), 'audible.chroma'), adjusted);
+  assert.equal(adjusted.noteMuted, false);
+  assert.equal(adjusted.backgroundMuted, false);
+});
+
+test('zero and nonzero slider volumes round-trip independently', () => {
+  for (const noteVolume of [0, 36, 100]) {
+    for (const backgroundVolume of [0, 82, 100]) {
+      const project = { ...DEFAULT_PROJECT, noteVolume, backgroundVolume };
+      assert.deepEqual(parseProjectFile(serializeProject(project), 'volumes.chroma'), project);
     }
   }
 });

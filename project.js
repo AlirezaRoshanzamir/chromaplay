@@ -103,6 +103,12 @@ export function validateProject(input, { allowInvalidNotation = false } = {}) {
       throw new Error(`${label} must be true or false.`);
     }
   }
+  // Older scores kept mute separate from volume. Show that state on the slider
+  // so raising its value always restores sound without a hidden mute flag.
+  for (const channel of ['note', 'background']) {
+    if (project[`${channel}Muted`]) project[`${channel}Volume`] = 0;
+    project[`${channel}Muted`] = false;
+  }
 
   const parsed = parseNotation(project.notation);
   project.tempo = parsed.tempo;
