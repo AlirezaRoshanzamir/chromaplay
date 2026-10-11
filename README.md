@@ -17,7 +17,7 @@ Follow the falling notes or play the harmonica directly with your mouse and keyb
 - Three sounds: synthesized reed, FluidR3 harmonica, and recorded VCSL chromatic harmonica.
 - A playable harmonica with mouse, touch, and keyboard controls.
 - Local backing tracks with separate volume and positive or negative start offsets.
-- Independent mute controls for notes and backing audio, available during playback.
+- Separate Track and Notes volume sliders in the player, available during playback.
 - Plain-text copying, score import/export, and browser autosave.
 
 ChromaPlay is a static HTML, CSS, and JavaScript app. It has no application backend, account system, or third-party JavaScript dependencies.
@@ -139,7 +139,7 @@ When several hole keys are held, the last one pressed sounds. Releasing it retur
 
 These shortcuts stay inactive while typing in the editor or other fields, or while the notation guide is open. They do not override Ctrl/Command or Alt shortcuts. Leaving the tab or window stops a held note.
 
-Manual playing works with an empty score and uses the **Notes** volume and mute setting. It pauses score playback while keeping the current position.
+Manual playing works with an empty score and uses the **Notes** volume setting. It pauses score playback while keeping the current position.
 
 ### Tuning and sound
 
@@ -185,19 +185,19 @@ Drag the horizontal handle at the bottom of the visualization card up or down to
 
 Short notes keep their hole and slider labels, using a smaller font when needed. The visible time window adjusts with the visualizer height to keep those notes readable.
 
-### Muting during playback
+### Adjusting volume during playback
 
-The **Notes** and **Backing track** mute buttons below the progress bar work independently. Keep both audible, mute either one, or mute both for silent visual practice. You can change either setting during playback without moving the playhead or changing the saved volume levels.
+The **Track** and **Notes** sliders below the progress bar set each part's volume from **0% to 100%**. Set either one to **0%** to mute it, or both to **0%** for silent visual practice. Raising the slider restores its sound. You can adjust either volume during playback without moving the playhead.
 
-Muting notes also silences the metronome and manually played holes. The mute settings autosave with the score and are included in exported projects. Older projects open with both parts unmuted.
+The Notes slider also controls the metronome and manually played holes. Volumes autosave with the score and are included in exported projects. A muted part in an older saved score opens at 0%, so its state is visible and you can restore it with the slider.
 
 ## Backing tracks
 
 Choose a local audio file or drop it on the upload area. Supported formats depend on your browser; MP3 and WAV are good starting points. Files can be up to **100 MB**.
 
-Track and note volumes are separate. Use the playback mute buttons to silence either part without losing its volume setting. The audio file plays at its original speed; changing the score tempo does not stretch the track.
+Track and note volumes are separate. Adjust them with the sliders in the player panel. The audio file plays at its original speed; changing the score tempo does not stretch the track.
 
-![Backing track controls for choosing an audio file, setting its start offset, and adjusting the mix](docs/screenshots/backing-track.jpg)
+![Backing track controls for choosing an audio file and setting its start offset](docs/screenshots/backing-track.jpg)
 
 Choose a track from your device and adjust its timing to match the score.
 
@@ -215,7 +215,7 @@ A negative offset provides a lead-in when playing from the beginning or restarti
 
 The current score and settings autosave to this browser's local storage, including unfinished notation. Storage belongs to the browser and site address. Clearing browser data removes it, and scores saved at another ChromaPlay address do not appear here automatically. Use export/import to move them.
 
-- **Export score** downloads a `.chroma.json` file with the title, notation and its tempo/meter headers, sound choice, track offset, volumes, mute settings, metronome, and loop settings.
+- **Export score** downloads a `.chroma.json` file with the title, notation and its tempo/meter headers, sound choice, track offset, volumes, metronome, and loop settings.
 - **Import** accepts `.json` and `.chroma` projects, or `.txt` notation. Text imports keep tempo/meter headers, use defaults for omitted settings, and use the filename as the title. Version 1 projects are migrated to the current format automatically.
 - Imports validate notation and settings before replacing the score. Score files are limited to **1 MB**, and notation to **100,000 characters**.
 
