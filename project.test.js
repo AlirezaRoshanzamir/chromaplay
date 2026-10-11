@@ -10,7 +10,7 @@ test('the default warm-up has 32 quarter beats and the requested settings', () =
   assert.equal(DEFAULT_PROJECT.tempo, 90);
   assert.equal(DEFAULT_PROJECT.numerator, 4);
   assert.equal(DEFAULT_PROJECT.denominator, 4);
-  assert.equal(DEFAULT_PROJECT.instrument, 'synth');
+  assert.equal(DEFAULT_PROJECT.instrument, 'fluid');
   assert.equal(DEFAULT_PROJECT.version, 2);
   assert.ok(DEFAULT_PROJECT.notation.startsWith('TEMPO 90\nTSIG 4/4\n'));
   assert.equal(DEFAULT_PROJECT.backgroundOffset, 0);
@@ -192,7 +192,7 @@ test('all sound choices round-trip, and unsupported choices are rejected', () =>
     assert.throws(() => validateProject({ ...DEFAULT_PROJECT, instrument }), /Choose/);
   }
   const { instrument, ...oldProject } = DEFAULT_PROJECT;
-  assert.equal(validateProject(oldProject).instrument, 'synth');
+  assert.equal(validateProject(oldProject).instrument, 'fluid');
 });
 
 test('version 1 and unversioned settings migrate into headers without changing notes', () => {

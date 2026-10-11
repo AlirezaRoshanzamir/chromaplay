@@ -14,7 +14,7 @@ export const DEFAULT_PROJECT = Object.freeze({
   tempo: 90,
   numerator: 4,
   denominator: 4,
-  instrument: 'synth',
+  instrument: 'fluid',
   backgroundOffset: 0,
   noteVolume: 70,
   backgroundVolume: 65,

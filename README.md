@@ -147,7 +147,7 @@ The instrument uses standard C solo tuning, following the [HOHNER tuning chart](
 
 The `#` symbol means press the slider; it is not a written pitch accidental.
 
-Use the sound menu to choose the tone for score playback and manually played holes:
+FluidR3 harmonica is the default sound. Saved scores keep their selected sound. Use the sound menu to choose the tone for score playback and manually played holes:
 
 | Sound | Source |
 | --- | --- |
