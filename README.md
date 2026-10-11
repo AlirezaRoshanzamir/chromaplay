@@ -13,7 +13,7 @@ Follow the falling notes or play the harmonica directly with your mouse and keyb
 - A simple notation language for holes, blow/draw, the slider, note lengths, and rests.
 - An inline score editor with duration-sized note boxes, breath colors, and a moving playhead.
 - A falling-note visualizer across all 12 holes, with adjustable height and labels for short notes.
-- Tempo and time signature written directly in the score, a metronome, looping, seeking, and note-by-note navigation.
+- Tempo and time signature controls in the score panel, synced with text headers, plus a metronome, looping, seeking, and note-by-note navigation.
 - Three sounds: synthesized reed, FluidR3 harmonica, and recorded VCSL chromatic harmonica.
 - A playable harmonica with mouse, touch, and keyboard controls.
 - Local backing tracks with separate volume and positive or negative start offsets.
@@ -28,10 +28,10 @@ Open the [live app](https://alirezaroshanzamir.github.io/chromaplay/), try the i
 
 1. Choose **Blank score** from the example menu, or edit the existing notes.
 2. Enter notation such as `1q -1q 2q -2q | 3h 0h`.
-3. Add `TEMPO 90` and `TSIG 4/4` on their own lines at the top to set the tempo and meter. Without headers, the score uses 60 BPM and 4/4.
+3. Set the tempo and time signature with the score panel controls, or write `TEMPO 90` and `TSIG 4/4` on their own lines at the top. The controls and headers stay in sync. Without headers, the score uses 60 BPM and 4/4.
 4. Choose a sound, press **Play**, and follow the notes. Add a backing track if you want to play along.
 
-Editing notation pauses playback and returns to the beginning. Invalid notation is highlighted and must be fixed before playback or export.
+Editing notation or changing the score's timing controls pauses playback and returns to the beginning. Invalid notation is highlighted and must be fixed before playback or export.
 
 ### Run locally
 
@@ -55,7 +55,7 @@ TSIG 4/4
 1q -1q 2q -2q | 3h 0h
 ```
 
-Keep each header on its own line before the notes. Either header may be omitted; defaults are `TEMPO 60` and `TSIG 4/4`. `TEMP` is also accepted as an alias for `TEMPO`. These settings stay in copied and exported notation.
+Keep each header on its own line before the notes. Either header may be omitted; defaults are `TEMPO 60` and `TSIG 4/4`. `TEMP` is also accepted as an alias for `TEMPO`. The score panel's tempo and time signature controls update these headers, and editing a header updates its control. These settings stay in copied and exported notation.
 
 Each note has this form:
 
@@ -161,7 +161,9 @@ The selected sound autosaves and is included in exported projects. Sample loadin
 
 ## Tempo and playback
 
-Write `TEMPO number` and `TSIG numerator/denominator` at the top of the score, before any notes. The headers can appear in either order, with one setting per line. Duplicate settings and headers placed after notes are reported as errors. `TEMP` is accepted as a shorter spelling of `TEMPO`.
+Use the tempo minus/plus buttons or BPM field and the time signature controls in the score panel. You can also write `TEMPO number` and `TSIG numerator/denominator` at the top of the score, before any notes. Changing a control updates its header; editing a header updates the controls.
+
+The headers can appear in either order, with one setting per line. Duplicate settings and headers placed after notes are reported as errors. `TEMP` is accepted as a shorter spelling of `TEMPO`.
 
 ```text
 TEMPO 70
@@ -173,7 +175,7 @@ Tempo defaults to **60 BPM**, accepts whole numbers from **30-300**, and always 
 
 The time signature defaults to **4/4**. It accepts a numerator of **1-32** and a denominator of **2, 4, 8, or 16**. It controls visual bar lines and metronome pulses and accents without changing written note lengths. A `6/8` bar contains three quarter-note beats and six eighth-note metronome pulses.
 
-Tempo and meter are part of the score rather than separate playback controls. Removing a header restores that setting's default. Older saved projects keep their timing: ChromaPlay adds their existing tempo and time signature as score headers when first opening them.
+Tempo and meter are part of the score. Changing either with its control or header pauses playback and returns to the beginning. Removing a header restores that setting's default in the controls. Older saved projects keep their timing: ChromaPlay adds their existing tempo and time signature as score headers when first opening them.
 
 Use **Previous** and **Next** to move through notes and rests, **Restart** to return to the beginning, or the progress bar to seek. **Pause** stops both notes and backing audio. **Loop** repeats the score. Both audio parts stop at the end of the score.
 
