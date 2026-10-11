@@ -364,16 +364,17 @@ export class PracticeAudio {
   _scheduleClick(start, accent) {
     const source = this._context.createOscillator();
     const gain = this._context.createGain();
-    source.type = 'triangle';
-    source.frequency.setValueAtTime(accent ? 1450 : 1000, start);
+    // A short, bright pulse stays distinct from the sampled harmonica's attack.
+    source.type = 'square';
+    source.frequency.setValueAtTime(accent ? 2000 : 1500, start);
     gain.gain.setValueAtTime(0, start);
-    gain.gain.linearRampToValueAtTime(accent ? 0.09 : 0.055, start + 0.002);
-    gain.gain.exponentialRampToValueAtTime(0.001, start + 0.04);
+    gain.gain.linearRampToValueAtTime(accent ? 0.28 : 0.20, start + 0.002);
+    gain.gain.exponentialRampToValueAtTime(0.001, start + 0.065);
     source.connect(gain);
     gain.connect(this._clickGain);
     this._trackVoice(source, gain, 'click');
     source.start(start);
-    source.stop(Math.min(start + 0.045, this._endTime));
+    source.stop(Math.min(start + 0.07, this._endTime));
   }
 
   _scheduleBackground() {

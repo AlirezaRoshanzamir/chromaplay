@@ -172,12 +172,42 @@ test('6/8 metronome pulses use eighth notes while tempo remains quarter-note BPM
   await audio.play({ notes: score, bpm: 120 });
   audio._context.currentTime = 0.1;
   audio._tick();
-  const clicks = audio._context.nodes.filter(node => node.type === 'triangle');
+  const clicks = [...audio._voices].filter(voice => voice.type === 'click').map(voice => voice.source);
   assert.equal(clicks.length, 2);
   close(clicks[0].startTime, 0.035);
   close(clicks[1].startTime, 0.285);
-  assert.equal(clicks[0].frequency.events[0].value, 1450);
-  assert.equal(clicks[1].frequency.events[0].value, 1000);
+  assert.ok(clicks[0].frequency.events[0].value > clicks[1].frequency.events[0].value, 'the first beat has a higher accent');
+});
+
+test('metronome transients have enough energy to remain distinct from the default sampled sound', async t => {
+  const audio = makeAudio(t);
+  audio.setMetronome(true);
+  await audio.play({ notes: score, bpm: 120 });
+  audio._context.currentTime = 0.4;
+  audio._tick();
+  const clicks = [...audio._voices].filter(voice => voice.type === 'click');
+  assert.equal(clicks.length, 2);
+  const energyOverWindow = voice => {
+    const [initial, peak, decay] = voice.gain.gain.events;
+    const attackEnergy = peak.value ** 2 * (peak.time - initial.time) / 3;
+    const decayEnergy = (peak.value ** 2 - decay.value ** 2) * (decay.time - peak.time)
+      / (2 * Math.log(peak.value / decay.value));
+    const tailEnergy = decay.value ** 2 * Math.max(0, voice.source.stops[0] - decay.time);
+    const waveformPower = { square: 1, triangle: 1 / 3, sine: 1 / 2 }[voice.source.type];
+    assert.ok(waveformPower, 'the transient has a known waveform power');
+    assert.ok(voice.source.stops[0] - voice.source.startTime <= 0.08, 'the click remains a short transient');
+    return Math.sqrt((attackEnergy + decayEnergy + tailEnergy) * waveformPower / 0.08)
+      * audio._clickGain.gain.value;
+  };
+  const accentRms = energyOverWindow(clicks[0]);
+  const regularRms = energyOverWindow(clicks[1]);
+  // Browser-rendered FluidR3 C5 RMS over 80 ms at the default 70% Notes volume.
+  // The former click was about 29 dB below it; keep enough margin for masking
+  // without making the regular click dominate the harmonica.
+  const defaultNoteRms = 0.1048;
+  const relativeDb = 20 * Math.log10(regularRms / defaultNoteRms);
+  assert.ok(relativeDb >= -16 && relativeDb <= -5, `regular click balance: ${relativeDb.toFixed(1)} dB`);
+  assert.ok(accentRms > regularRms, 'the bar accent is stronger than the other pulses');
 });
 
 test('empty scores do not start audio, and backing offsets do not create lead-in without a track', async t => {
@@ -413,6 +443,45 @@ function mockSamples(t, responseForAudio = () => ({ ok: true, arrayBuffer: async
     ? { ok: true, json: async () => sampleMetadata }
     : responseForAudio(String(url)));
 }
+
+test('enabling the metronome during sampled playback schedules the next beat and disabling stops only clicks', async t => {
+  mockSamples(t);
+  const audio = makeAudio(t);
+  await audio.setInstrument('fluid');
+  await addBackground(audio);
+  await audio.play({ notes: score, bpm: 120 });
+  const context = audio._context;
+  const note = [...audio._voices].find(voice => voice.type === 'note');
+  const background = [...audio._voices].find(voice => voice.type === 'background');
+  const noteStops = [...note.source.stops];
+  const backgroundStops = [...background.source.stops];
+  const startTime = audio._startTime;
+  const endTime = audio._endTime;
+  assert.equal(note.source.kind, 'buffer');
+  context.currentTime = 0.1;
+  audio.setMetronome(true);
+  assert.equal([...audio._voices].filter(voice => voice.type === 'click').length, 0);
+  context.currentTime = 0.4;
+  audio._tick();
+  const click = [...audio._voices].find(voice => voice.type === 'click');
+  assert.ok(click, 'the next score beat has a click scheduled');
+  close(click.source.startTime, 0.535);
+  assert.equal(click.source.connections[0], click.gain);
+  assert.equal(click.gain.connections[0], audio._clickGain);
+  assert.equal(audio._clickGain.connections[0], context.destination);
+
+  audio.setMetronome(false);
+  assert.equal(click.source.stops.at(-1), context.currentTime);
+  assert.equal(click.source.disconnected, true);
+  assert.equal([...audio._voices].filter(voice => voice.type === 'click').length, 0);
+  assert.deepEqual(note.source.stops, noteStops);
+  assert.deepEqual(background.source.stops, backgroundStops);
+  assert.equal(note.source.disconnected, undefined);
+  assert.equal(background.source.disconnected, undefined);
+  assert.equal(audio.isPlaying, true);
+  assert.equal(audio._startTime, startTime);
+  assert.equal(audio._endTime, endTime);
+});
 
 test('sampled score notes use pitched sustain loops, shared mute gain, and accurate pause/resume durations', async t => {
   const fetchMock = mockSamples(t);
