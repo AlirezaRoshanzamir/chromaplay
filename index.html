@@ -43,12 +43,16 @@
         <section class="card score-card">
           <div class="card-heading"><h2><span data-icon="notes"></span> Your score</h2><span class="saved-status" id="saved-status"><span class="status-dot"></span> Saved here</span></div>
           <div class="score-name-row"><input id="score-title" value="Morning warm-up" maxlength="100" aria-label="Score title"><span data-icon="pencil"></span></div>
+          <div class="score-settings" role="group" aria-label="Score timing">
+            <div class="setting"><label for="tempo">TEMPO</label><div class="tempo-stepper"><button id="tempo-down" type="button" aria-label="Decrease tempo">-</button><input id="tempo" type="number" min="30" max="300" step="1" value="60" aria-label="Tempo in quarter notes per minute"><span>BPM</span><button id="tempo-up" type="button" aria-label="Increase tempo">+</button></div></div>
+            <div class="setting signature-setting"><label for="time-numerator">TIME SIGNATURE</label><div class="time-signature"><input id="time-numerator" type="number" min="1" max="32" step="1" value="4" aria-label="Time signature numerator"><span>/</span><select id="time-denominator" aria-label="Time signature denominator"><option>2</option><option selected>4</option><option>8</option><option>16</option></select></div></div>
+          </div>
           <div class="editor-toolbar"><span>HARMONICA TAB</span><div class="editor-actions"><select id="examples" aria-label="Load an example score"><option value="" selected>Try an example</option><option value="warmup">Morning warm-up</option><option value="chromatic">Chromatic steps</option><option value="waltz">A little 6/8</option><option value="blank">Blank score</option></select><button class="button secondary copy-notes" id="copy-notes" type="button"><span data-icon="copy"></span> Copy notes</button></div></div>
           <div class="editor-shell" id="note-editor">
             <div id="notation" contenteditable="true" role="textbox" aria-multiline="true" spellcheck="false" autocapitalize="off" autocomplete="off" autocorrect="off" aria-label="Harmonica notation" aria-describedby="editor-help notation-hint score-errors" data-placeholder="TEMPO 60&#10;TSIG 4/4&#10;Write a note, like -3#q..."></div>
             <div class="editor-playhead" aria-hidden="true" hidden></div>
           </div>
-          <p class="editor-help" id="editor-help">Start with <code>TEMPO 60</code> and <code>TSIG 4/4</code> on separate lines, or omit them to use those defaults. Click a note to edit. <code>L</code> starts a new line.</p>
+          <p class="editor-help" id="editor-help">The controls above stay in sync with your <code>TEMPO</code> and <code>TSIG</code> lines. Without those lines, defaults are 60 BPM and 4/4. Click a note to edit. <code>L</code> starts a new line.</p>
           <div class="score-stats"><span id="note-count">0 notes</span><span class="small-dot"></span><span id="bar-count">0 bars</span><span class="small-dot"></span><span id="score-timing">60 BPM / 4/4</span><span class="score-valid" id="score-valid"><span data-icon="check"></span> Ready to play</span></div>
           <div id="score-errors" class="score-errors" role="status" hidden></div>
           <div class="notation-hint" id="notation-hint"><code>-3#q</code><span>Draw <b>3</b> + slider <b>#</b> + quarter <b>q</b></span><button class="hint-help" id="hint-help" aria-label="Open notation guide">?</button></div>

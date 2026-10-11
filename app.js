@@ -1,4 +1,4 @@
-import { parseNotation, pitchFor, formatDuration } from './notation.js';
+import { parseNotation, pitchFor, formatDuration, updateScoreTiming } from './notation.js';
 import { PracticeAudio } from './audio.js';
 import { HarmonicaVisualizer } from './visualizer.js';
 import { NoteEditor } from './note-editor.js';
@@ -169,6 +169,7 @@ function refreshScore() {
   project.tempo = parsed.tempo;
   project.numerator = parsed.numerator;
   project.denominator = parsed.denominator;
+  syncTimingControls();
   audio.setTimeSignature(project.numerator, project.denominator);
   $('score-timing').textContent = `${project.tempo} BPM / ${project.numerator}/${project.denominator}`;
   $('copy-notes').disabled = project.notation.length === 0;
@@ -319,6 +320,46 @@ $('seek').addEventListener('pointerdown', () => { resumeAfterScrub = audio.isPla
 $('seek').addEventListener('input', () => { if (audio.isPlaying) pausePlayback(); position = Number($('seek').value); renderPosition(); updateTransport(); });
 $('seek').addEventListener('change', () => { if (resumeAfterScrub && position < parsed.totalBeats) void startPlayback(); resumeAfterScrub = false; });
 $('score-title').addEventListener('input', () => { project.title = $('score-title').value; save(); });
+
+function syncTimingControls() {
+  for (const [id, value] of [['tempo', project.tempo], ['time-numerator', project.numerator], ['time-denominator', project.denominator]]) {
+    if ($(id).value !== String(value)) $(id).value = value;
+  }
+  $('tempo-down').disabled = project.tempo <= 30;
+  $('tempo-up').disabled = project.tempo >= 300;
+}
+function editScoreTiming(patch) {
+  try {
+    const source = noteEditor.getValue();
+    const updated = updateScoreTiming(source, patch);
+    if (updated !== source) {
+      // Apply only the changed range so timing edits share the score's undo history.
+      let start = 0, end = source.length, updatedEnd = updated.length;
+      while (start < end && start < updatedEnd && source[start] === updated[start]) start++;
+      while (end > start && updatedEnd > start && source[end - 1] === updated[updatedEnd - 1]) { end--; updatedEnd--; }
+      noteEditor.applyEdit(start, end, updated.slice(start, updatedEnd), { finish: true });
+    }
+  } catch (error) {
+    notify(error.message || 'Check the timing lines in your score.', true);
+  }
+  syncTimingControls();
+}
+for (const [id, key] of [['tempo', 'tempo'], ['time-numerator', 'numerator']]) {
+  const input = $(id);
+  input.addEventListener('input', () => {
+    if (input.value !== '' && input.validity.valid) editScoreTiming({ [key]: Number(input.value) });
+  });
+  input.addEventListener('change', () => {
+    if (input.value !== '') {
+      const value = Math.min(Number(input.max), Math.max(Number(input.min), Math.round(Number(input.value))));
+      editScoreTiming({ [key]: value });
+    } else syncTimingControls();
+  });
+  input.addEventListener('blur', syncTimingControls);
+}
+$('tempo-down').addEventListener('click', () => editScoreTiming({ tempo: Math.max(30, project.tempo - 5) }));
+$('tempo-up').addEventListener('click', () => editScoreTiming({ tempo: Math.min(300, project.tempo + 5) }));
+$('time-denominator').addEventListener('change', () => editScoreTiming({ denominator: Number($('time-denominator').value) }));
 
 async function changeTiming(update) {
   const wasPlaying = audio.isPlaying || pendingPlay;

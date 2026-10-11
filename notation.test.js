@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { parseNotation, pitchFor, formatDuration } from './notation.js';
+import { parseNotation, pitchFor, formatDuration, updateScoreTiming } from './notation.js';
 
 const emptyScore = { notes: [], errors: [], totalBeats: 0, tempo: 60, numerator: 4, denominator: 4, directives: [] };
 
@@ -216,4 +216,67 @@ test('pitch inputs and duration formatting handle boundary values', () => {
   assert.equal(formatDuration(3601), '60:01');
   assert.equal(formatDuration(-10), '0:00');
   assert.equal(formatDuration(Infinity), '0:00');
+});
+
+test('timing controls preserve TEMP spelling, formatting, CRLF and every body character', () => {
+  const body = '\r\n 1qL - 3 # h.\t| 0e \r\n-2';
+  const source = ` \ttEmP\t 090  \r\n tSiG  6 / 8\t\r\n${body}`;
+  const updated = updateScoreTiming(source, { tempo: 120, numerator: 3 });
+  assert.equal(updated, ` \ttEmP\t 120  \r\n tSiG  3 / 8\t\r\n${body}`);
+  assert.equal(updateScoreTiming(updated, { tempo: 120, numerator: 3 }), updated);
+  assert.equal(updateScoreTiming(source, { tempo: 90, numerator: 6, denominator: 8 }), source);
+});
+
+test('missing timing controls insert only requested headers in tempo then signature order', () => {
+  const body = '\n 1q L-3#q\n\n0h ';
+  assert.equal(updateScoreTiming(body, { tempo: 60 }), `TEMPO 60\n${body}`);
+  assert.equal(updateScoreTiming(body, { numerator: 6 }), `TSIG 6/4\n${body}`);
+  assert.equal(updateScoreTiming(body, { denominator: 8 }), `TSIG 4/8\n${body}`);
+  assert.equal(updateScoreTiming(body, { tempo: 90, numerator: 6, denominator: 8 }), `TEMPO 90\nTSIG 6/8\n${body}`);
+  assert.equal(updateScoreTiming(`TSIG 6/8\n${body}`, { tempo: 90 }), `TEMPO 90\nTSIG 6/8\n${body}`);
+  assert.equal(updateScoreTiming(`TEMP 70\r\n${body}`, { denominator: 8 }), `TEMP 70\r\nTSIG 4/8\r\n${body}`);
+  assert.equal(updateScoreTiming('TEMP 70', { numerator: 3 }), 'TEMP 70\nTSIG 3/4\n');
+  assert.equal(updateScoreTiming('', { tempo: 90, numerator: 6, denominator: 8 }), 'TEMPO 90\nTSIG 6/8\n');
+});
+
+test('controls repair simple malformed headers without normalizing other invalid settings', () => {
+  const source = '  TEMP\twrong  \nTSIG 6/3\n1q -3#';
+  const changed = updateScoreTiming(source, { tempo: 80 });
+  assert.equal(changed, '  TEMP\t80  \nTSIG 6/3\n1q -3#');
+  assert.equal(updateScoreTiming(changed, { numerator: 5 }), '  TEMP\t80  \nTSIG 5/3\n1q -3#');
+  assert.equal(updateScoreTiming(changed, { denominator: 8 }), '  TEMP\t80  \nTSIG 6/8\n1q -3#');
+  assert.equal(updateScoreTiming('TEMPO60\nTSIG wrong\n1q', { numerator: 3 }), 'TEMPO60\nTSIG 3/4\n1q');
+  assert.equal(updateScoreTiming('TEMPO60\n1q', { tempo: 90 }), 'TEMPO 90\n1q');
+});
+
+test('duplicate and misplaced headers remain visible instead of being silently removed', () => {
+  const duplicate = 'TEMPO 60\nTEMP 80\nTSIG 3/4\n1q';
+  const updated = updateScoreTiming(duplicate, { tempo: 90 });
+  assert.equal(updated, 'TEMPO 90\nTEMP 80\nTSIG 3/4\n1q');
+  assert.ok(parseNotation(updated).errors.some(error => error.message.includes('only one')));
+  const misplaced = '1q\nTEMPO 80\n-3#h';
+  const fixedTop = updateScoreTiming(misplaced, { tempo: 90 });
+  assert.equal(fixedTop, `TEMPO 90\n${misplaced}`);
+  assert.ok(parseNotation(fixedTop).errors.some(error => error.message.includes('before the notes')));
+  assert.equal(updateScoreTiming('1q TEMPO 60\n2q', { tempo: 90 }), 'TEMPO 90\n1q TEMPO 60\n2q');
+});
+
+test('ambiguous header repairs never discard music or another header on the same line', () => {
+  for (const source of ['TEMPO 90 1q\n2h', 'TEMP 1 q L\n2h', 'TEMPO 60 TSIG 4/4\n1q',
+    'TEMPO 90 -3#\n2q', 'TEMPO 90 -\n2q', 'TEMP 90 1\n2q', 'TEMPO 90 | 1\n2q']) {
+    assert.throws(() => updateScoreTiming(source, { tempo: 90 }), /Edit the TEMPO line directly/);
+  }
+  assert.throws(() => updateScoreTiming('TSIG 4/4 -3#q\n1q', { denominator: 8 }), /Edit the TSIG line directly/);
+  assert.throws(() => updateScoreTiming('TSIG 4/4 | 1\n2q', { numerator: 3 }), /Edit the TSIG line directly/);
+});
+
+test('timing patches reject invalid values and leave empty patches unchanged', () => {
+  const source = 'TEMPO 60\n1q';
+  assert.equal(updateScoreTiming(source, {}), source);
+  for (const patch of [null, [], '90', { bpm: 90 }, { tempo: '90' }, { tempo: 29 }, { tempo: 301 },
+    { tempo: 90.5 }, { numerator: 0 }, { numerator: 33 }, { denominator: 3 }, { denominator: null },
+    { tempo: 90, numerator: NaN }]) {
+    assert.throws(() => updateScoreTiming(source, patch), { name: /TypeError|RangeError/ }, JSON.stringify(patch));
+  }
+  assert.throws(() => updateScoreTiming(null, { tempo: 90 }), TypeError);
 });

@@ -59,6 +59,77 @@ function parseHeaders(source) {
   return result;
 }
 
+/** Change score controls without rewriting note text or unrelated headers. */
+export function updateScoreTiming(source, patch) {
+  if (typeof source !== 'string') throw new TypeError('Notation must be text.');
+  if (!patch || typeof patch !== 'object' || Array.isArray(patch)) throw new TypeError('Timing changes must be an object.');
+  for (const [key, value] of Object.entries(patch)) {
+    if (!['tempo', 'numerator', 'denominator'].includes(key)) throw new TypeError(`Unknown timing setting: ${key}.`);
+    const valid = Number.isInteger(value) && (key === 'tempo' ? value >= 30 && value <= 300
+      : key === 'numerator' ? value >= 1 && value <= 32 : [2, 4, 8, 16].includes(value));
+    if (!valid) throw new RangeError(key === 'tempo' ? 'Tempo must be a whole number from 30 to 300.'
+      : key === 'numerator' ? 'Time signature numerator must be a whole number from 1 to 32.'
+        : 'Time signature denominator must be 2, 4, 8, or 16.');
+  }
+  const has = key => Object.hasOwn(patch, key);
+  let updated = source;
+  const newline = source.match(/\r\n|\r|\n/)?.[0] || '\n';
+  const requested = [];
+  if (has('tempo')) requested.push('tempo');
+  if (has('numerator') || has('denominator')) requested.push('time-signature');
+
+  for (const kind of requested) {
+    const parsed = parseHeaders(updated);
+    const eligible = [];
+    let cursor = 0;
+    for (const directive of parsed.directives) {
+      // Anything other than whitespace between header lines starts the body.
+      if (updated.slice(cursor, directive.start).trim()) break;
+      eligible.push(directive);
+      cursor = directive.end;
+    }
+    const target = eligible.find(directive => directive.kind === kind);
+    const keyword = kind === 'tempo' ? 'TEMPO' : 'TSIG';
+    const numerator = has('numerator') ? patch.numerator : parsed.numerator;
+    const denominator = has('denominator') ? patch.denominator : parsed.denominator;
+    const value = kind === 'tempo' ? String(patch.tempo) : `${numerator}/${denominator}`;
+    if (target) {
+      const text = updated.slice(target.start, target.end);
+      const signature = /^(TSIG)(\s+)(\d+)(\s*\/\s*)(\d+)(\s*)$/i.exec(text);
+      let replacement;
+      if (kind === 'time-signature' && signature) {
+        const top = has('numerator') && Number(signature[3]) !== patch.numerator ? String(patch.numerator) : signature[3];
+        const bottom = has('denominator') && Number(signature[5]) !== patch.denominator ? String(patch.denominator) : signature[5];
+        replacement = `${signature[1]}${signature[2]}${top}${signature[4]}${bottom}${signature[6]}`;
+      } else {
+        const parts = /^(TEMPO|TEMP|TSIG)(\s*)(.*?)(\s*)$/i.exec(text);
+        const oldValue = parts[3];
+        // A malformed header may also contain music. Ask for a direct edit
+        // instead of deleting that text while repairing the header value.
+        if (/[-+]?\s*\d+(?:\s+\d+)*\s*#?\s*[whqes]\.?(?![a-z])/i.test(oldValue)
+          || /[#|]|\d\s+\d/.test(oldValue) || /[+-]/.test(oldValue) && !/^[+-]?\d+(?:\.\d+)?$/.test(oldValue)
+          || /L/.test(oldValue) || /\b(?:TEMPO|TEMP|TSIG)(?![a-z])/i.test(oldValue)) {
+          throw new Error(`Edit the ${keyword} line directly: it also contains note text or another header.`);
+        }
+        const sameTempo = kind === 'tempo' && /^\d+$/.test(oldValue) && Number(oldValue) === patch.tempo;
+        replacement = sameTempo ? text : `${parts[1]}${parts[2] || ' '}${value}${parts[4]}`;
+      }
+      updated = updated.slice(0, target.start) + replacement + updated.slice(target.end);
+      continue;
+    }
+
+    const tempoHeader = kind === 'time-signature' && eligible.find(directive => directive.kind === 'tempo');
+    if (tempoHeader) {
+      const followingNewline = /^(?:\r\n|\r|\n)/.exec(updated.slice(tempoHeader.end))?.[0];
+      const insertAt = tempoHeader.end + (followingNewline?.length || 0);
+      updated = `${updated.slice(0, insertAt)}${followingNewline ? '' : newline}${keyword} ${value}${newline}${updated.slice(insertAt)}`;
+    } else {
+      updated = `${keyword} ${value}${newline}${updated}`;
+    }
+  }
+  return updated;
+}
+
 /** Return sounding pitch in scientific pitch notation. A zero hole is a rest. */
 export function pitchFor(hole, draw = false, slider = false) {
   if (hole === 0) return { midi: null, pitch: null };
