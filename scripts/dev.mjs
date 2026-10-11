@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { resolve, extname, sep } from 'node:path';
 const root = fileURLToPath(new URL('../', import.meta.url));
 const port = Number(process.env.PORT || 5173);
-const types = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.json': 'application/json' };
+const types = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.json': 'application/json', '.wav': 'audio/wav', '.md': 'text/plain' };
 createServer(async (req, res) => {
   try {
     const url = new URL(req.url, 'http://localhost');
