@@ -45,6 +45,7 @@ let playRequest = 0;
 let frame = null;
 let toastTimer;
 let backgroundRequest = 0;
+let instrumentRequest = 0;
 let manual;
 const audio = new PracticeAudio({
   onStateChange: ({ isPlaying, beat }) => { position = beat; updateTransport(); if (isPlaying) startFrames(); else cancelFrames(); },
@@ -115,7 +116,7 @@ manual = new ManualHarmonica($('harmonica'), {
   audio,
   drawButton: $('manual-draw'),
   sliderButton: $('manual-slider'),
-  onStart: () => { if (audio.isPlaying || pendingPlay) pausePlayback(false); },
+  onStart: () => { if (audio.isPlaying || pendingPlay) pausePlayback(false); else playRequest++; },
   onChange: () => { activeIndex = -2; renderPosition(); updateTransport(); },
   onError: error => notify(error.message || 'Audio could not start in this browser.', true),
   isBlocked: () => $('guide-dialog').open,
@@ -151,9 +152,6 @@ function setRangeFill(element) {
 function applyProject() {
   $('score-title').value = project.title;
   noteEditor.setValue(project.notation);
-  $('tempo').value = project.tempo;
-  $('time-numerator').value = project.numerator;
-  $('time-denominator').value = project.denominator;
   $('background-offset').value = project.backgroundOffset;
   $('note-volume').value = project.noteVolume;
   $('background-volume').value = project.backgroundVolume;
@@ -164,13 +162,19 @@ function applyProject() {
   audio.setNoteMuted(project.noteMuted);
   audio.setBackgroundMuted(project.backgroundMuted);
   audio.setMetronome(project.metronome);
-  audio.setTimeSignature(project.numerator, project.denominator);
+  $('instrument').value = project.instrument;
+  void selectInstrument();
   updateVolumes();
   updateMutes();
   refreshScore();
 }
 function refreshScore() {
   parsed = parseNotation(project.notation);
+  project.tempo = parsed.tempo;
+  project.numerator = parsed.numerator;
+  project.denominator = parsed.denominator;
+  audio.setTimeSignature(project.numerator, project.denominator);
+  $('score-timing').textContent = `${project.tempo} BPM / ${project.numerator}/${project.denominator}`;
   $('copy-notes').disabled = project.notation.length === 0;
   const barBeats = project.numerator * 4 / project.denominator;
   visualizer.setScore(parsed.errors.length ? [] : parsed.notes, { beatsPerBar: barBeats });
@@ -248,8 +252,9 @@ function renderPosition() {
 function updateTransport() {
   const playing = audio.isPlaying;
   $('play').querySelector('[data-icon]').innerHTML = icon(playing ? 'pause' : 'play');
-  $('play-label').textContent = playing ? 'Pause' : 'Play';
-  $('play').setAttribute('aria-label', playing ? 'Pause' : 'Play');
+  const playLabel = playing ? 'Pause' : pendingPlay ? 'Cancel' : 'Play';
+  $('play-label').textContent = playLabel;
+  $('play').setAttribute('aria-label', playLabel);
   const invalid = !!parsed.errors.length || !parsed.notes.length;
   $('play').disabled = invalid;
   ['restart','previous','next','seek'].forEach(id => { $(id).disabled = invalid; });
@@ -264,16 +269,31 @@ function startFrames() {
 function cancelFrames() { if (frame !== null) cancelAnimationFrame(frame); frame = null; }
 function pausePlayback(stopManual = true) { if (stopManual) manual?.stop(); const beat = audio.isPlaying ? audio.getPosition() : position; playRequest++; pendingPlay = false; audio.pause(); position = beat; renderPosition(); }
 async function startPlayback(includeLeadIn = false) {
+  noteEditor.commit();
   if (parsed.errors.length || !parsed.notes.length) return;
   manual.stop();
-  noteEditor.commit();
   const request = ++playRequest;
   if (position >= parsed.totalBeats) { position = 0; includeLeadIn = true; }
   pendingPlay = true;
+  updateTransport();
+  if (project.instrument !== 'synth') {
+    $('instrument-status').textContent = 'Preparing sound...';
+    $('instrument-status').classList.remove('error');
+  }
   try {
     await audio.play({ notes: parsed.notes, bpm: project.tempo, fromBeat: position, backgroundOffset: project.backgroundOffset, includeLeadIn });
-  } catch (error) { if (request === playRequest) { notify(error.message || 'Audio could not start in this browser.', true); updateTransport(); } }
-  finally { if (request === playRequest) pendingPlay = false; }
+    if (request === playRequest && project.instrument !== 'synth') $('instrument-status').textContent = 'Ready';
+  } catch (error) {
+    if (request === playRequest) {
+      if (project.instrument !== 'synth') {
+        $('instrument-status').textContent = 'Could not play. Try again or choose another sound.';
+        $('instrument-status').classList.add('error');
+      }
+      notify(error.message || 'Audio could not start in this browser.', true);
+      updateTransport();
+    }
+  }
+  finally { if (request === playRequest) { pendingPlay = false; updateTransport(); } }
 }
 async function togglePlayback() { if (audio.isPlaying || pendingPlay) pausePlayback(); else await startPlayback(position === 0); }
 async function seekTo(beat, leadIn = false) {
@@ -314,20 +334,37 @@ async function changeTiming(update) {
   if (leadInSeconds !== null) { position = Math.max(leadInSeconds, Math.min(0, project.backgroundOffset)) * project.tempo / 60; renderPosition(); }
   if (wasPlaying && position < parsed.totalBeats) await startPlayback();
 }
-function setTempo(value) {
-  const tempo = Math.min(300, Math.max(30, Math.round(Number(value) || project.tempo)));
-  $('tempo').value = tempo;
-  if (tempo === project.tempo) return;
-  void changeTiming(() => { project.tempo = tempo; });
+async function selectInstrument(resume = false) {
+  const request = ++instrumentRequest;
+  const playbackRequest = playRequest;
+  if (resume) { pendingPlay = true; updateTransport(); }
+  $('instrument-status').textContent = project.instrument === 'synth' ? '' : 'Loading sound...';
+  $('instrument-status').classList.remove('error');
+  $('instrument').setAttribute('aria-busy', 'true');
+  try {
+    await audio.setInstrument(project.instrument);
+    if (request !== instrumentRequest) return;
+    $('instrument-status').textContent = project.instrument === 'synth' ? '' : 'Ready';
+    if (resume && playbackRequest === playRequest && position < parsed.totalBeats) await startPlayback();
+  } catch (error) {
+    if (request !== instrumentRequest) return;
+    $('instrument-status').textContent = 'Could not load. Choose a sound to retry.';
+    $('instrument-status').classList.add('error');
+    notify(error.message || 'This sound could not load. Try again or choose Synthesized reed.', true);
+  } finally {
+    if (request === instrumentRequest) {
+      $('instrument').setAttribute('aria-busy', 'false');
+      if (resume && playbackRequest === playRequest) { pendingPlay = false; updateTransport(); }
+    }
+  }
 }
-$('tempo').addEventListener('input', () => { if ($('tempo').validity.valid && $('tempo').value !== '') setTempo($('tempo').value); });
-$('tempo').addEventListener('change', () => setTempo($('tempo').value));
-$('tempo-down').addEventListener('click', () => setTempo(project.tempo - 5));
-$('tempo-up').addEventListener('click', () => setTempo(project.tempo + 5));
-function setNumerator() { const value = Math.min(32, Math.max(1, Math.round(Number($('time-numerator').value) || project.numerator))); $('time-numerator').value = value; if (value !== project.numerator) void changeTiming(() => { project.numerator = value; }); }
-$('time-numerator').addEventListener('input', () => { if ($('time-numerator').validity.valid && $('time-numerator').value !== '') setNumerator(); });
-$('time-numerator').addEventListener('change', setNumerator);
-$('time-denominator').addEventListener('change', () => { void changeTiming(() => { project.denominator = Number($('time-denominator').value); }); });
+$('instrument').addEventListener('change', () => {
+  const wasPlaying = audio.isPlaying || pendingPlay;
+  pausePlayback();
+  project.instrument = $('instrument').value;
+  save();
+  void selectInstrument(wasPlaying);
+});
 function setOffset() { const value = Math.min(600, Math.max(-600, Number($('background-offset').value) || 0)); $('background-offset').value = value; if (value !== project.backgroundOffset) void changeTiming(() => { project.backgroundOffset = value; }); }
 $('background-offset').addEventListener('input', () => { if ($('background-offset').validity.valid && $('background-offset').value !== '') setOffset(); });
 $('background-offset').addEventListener('change', setOffset);
@@ -353,15 +390,15 @@ $('background-volume').addEventListener('input', () => { project.backgroundVolum
 
 const examples = {
   warmup: { ...DEFAULT_PROJECT },
-  chromatic: { ...DEFAULT_PROJECT, title:'Chromatic steps', tempo:75, notation:'1q 1#q -1q -1#q |\n2q -2q -2#q 3q |\n3#q -3q -3#q -4q |\n4h 0h' },
-  waltz: { ...DEFAULT_PROJECT, title:'A little 6/8', tempo:70, numerator:6, denominator:8, notation:'1q. 2e 3e 2e |\n-1q. -2q. |\n2e 3e 4e -4e -3e 3e |\n2h. |\n1q. 2e 3e 2e |\n-1e 2e -2e 3q. |\n4q. -4q. |\n4h 0q' },
+  chromatic: { ...DEFAULT_PROJECT, title:'Chromatic steps', notation:'TEMPO 75\nTSIG 4/4\n1q 1#q -1q -1#q |\n2q -2q -2#q 3q |\n3#q -3q -3#q -4q |\n4h 0h' },
+  waltz: { ...DEFAULT_PROJECT, title:'A little 6/8', notation:'TEMPO 70\nTSIG 6/8\n1q. 2e 3e 2e |\n-1q. -2q. |\n2e 3e 4e -4e -3e 3e |\n2h. |\n1q. 2e 3e 2e |\n-1e 2e -2e 3q. |\n4q. -4q. |\n4h 0q' },
   blank: { ...DEFAULT_PROJECT, title:'Untitled melody', notation:'' },
 };
 $('examples').addEventListener('change', () => {
   const example = examples[$('examples').value];
   if (!example) return;
   stopForEdit();
-  project = { ...example, noteVolume: project.noteVolume, backgroundVolume:project.backgroundVolume, backgroundOffset: project.backgroundOffset };
+  project = { ...example, instrument: project.instrument, noteVolume: project.noteVolume, backgroundVolume:project.backgroundVolume, backgroundOffset: project.backgroundOffset };
   applyProject(); save(); $('examples').value = '';
 });
 $('import-button').addEventListener('click', () => $('import-file').click());

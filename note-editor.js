@@ -7,12 +7,17 @@ export function editorSegments(source, activeRange = null) {
   const segments = [];
   const appendText = (start, end) => {
     let cursor = start;
-    while (cursor < end) {
-      const marker = source.indexOf('L', cursor);
-      if (marker < 0 || marker >= end) break;
+    let marker = source.indexOf('L', cursor);
+    while (marker >= 0 && marker < end) {
+      // Even an unfinished header stays plain text while it is being edited.
+      if (score.directives.some(directive => marker >= directive.start && marker < directive.end)) {
+        marker = source.indexOf('L', marker + 1);
+        continue;
+      }
       if (marker > cursor) segments.push({ type: 'text', text: source.slice(cursor, marker), start: cursor, end: marker });
       segments.push({ type: 'line-break', text: 'L', start: marker, end: marker + 1 });
       cursor = marker + 1;
+      marker = source.indexOf('L', cursor);
     }
     if (cursor < end) segments.push({ type: 'text', text: source.slice(cursor, end), start: cursor, end });
   };
@@ -192,7 +197,7 @@ export class NoteEditor {
     const result = editorSegments(this.source, this.activeRange);
     this.score = result;
     this.editor.dataset.empty = String(this.source.length === 0);
-    this.editor.classList.toggle('has-line-markers', this.source.includes('L'));
+    this.editor.classList.toggle('has-line-markers', result.segments.some(segment => segment.type === 'line-break'));
     this.root.classList.toggle('has-errors', result.errors.length > 0);
     this.chips.clear();
     const fragment = document.createDocumentFragment();

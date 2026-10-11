@@ -6,6 +6,59 @@ const PITCH_NAMES = Object.freeze(['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G
 
 export const DURATION_BEATS = Object.freeze({ w: 4, h: 2, q: 1, e: 0.5, s: 0.25 });
 
+/** Headers occupy their own lines and never contribute notes or beats. */
+function parseHeaders(source) {
+  const result = { tempo: 60, numerator: 4, denominator: 4, directives: [], errors: [] };
+  const seen = new Set();
+  let bodyStarted = false;
+  for (const line of source.matchAll(/[^\r\n]*(?:\r\n|\r|\n|$)/g)) {
+    if (!line[0]) continue;
+    const text = line[0].replace(/[\r\n]+$/, '');
+    const match = /\b(TEMPO|TEMP|TSIG)(?![a-z])/i.exec(text);
+    if (!match) {
+      if (text.trim()) bodyStarted = true;
+      continue;
+    }
+
+    const keyword = match[1].toUpperCase();
+    const kind = keyword === 'TSIG' ? 'time-signature' : 'tempo';
+    const start = line.index + match.index;
+    const end = line.index + text.length;
+    const directive = { kind, start, end, valid: false };
+    result.directives.push(directive);
+    if (text.slice(0, match.index).trim()) bodyStarted = true;
+    const header = text.slice(match.index).trim();
+    const value = kind === 'tempo'
+      ? /^(?:TEMPO|TEMP)\s+(\d+)$/i.exec(header)
+      : /^TSIG\s+(\d+)\s*\/\s*(\d+)$/i.exec(header);
+    let message = '';
+    if (bodyStarted) message = `Put ${keyword} on its own header line before the notes.`;
+    else if (seen.has(kind)) message = `Use only one ${kind === 'tempo' ? 'TEMPO' : 'TSIG'} header.`;
+    else if (kind === 'tempo') {
+      const tempo = value ? Number(value[1]) : NaN;
+      if (!Number.isInteger(tempo) || tempo < 30 || tempo > 300) message = 'Use TEMPO followed by a whole number from 30 to 300, such as TEMPO 60.';
+      else directive.tempo = tempo;
+    } else {
+      const numerator = value ? Number(value[1]) : NaN;
+      const denominator = value ? Number(value[2]) : NaN;
+      if (!Number.isInteger(numerator) || numerator < 1 || numerator > 32 || ![2, 4, 8, 16].includes(denominator)) {
+        message = 'Use TSIG with a numerator from 1 to 32 and a denominator of 2, 4, 8, or 16, such as TSIG 4/4.';
+      } else Object.assign(directive, { numerator, denominator });
+    }
+    seen.add(kind);
+    if (message) result.errors.push({ message, start, end });
+    else {
+      directive.valid = true;
+      if (kind === 'tempo') result.tempo = directive.tempo;
+      else {
+        result.numerator = directive.numerator;
+        result.denominator = directive.denominator;
+      }
+    }
+  }
+  return result;
+}
+
 /** Return sounding pitch in scientific pitch notation. A zero hole is a rest. */
 export function pitchFor(hole, draw = false, slider = false) {
   if (hole === 0) return { midi: null, pitch: null };
@@ -24,6 +77,7 @@ export function pitchFor(hole, draw = false, slider = false) {
  * Parse [+|-]hole[#]duration[.] with quarter-note beats.
  * Whitespace and bar separators are ignored, including inside a note.
  * Uppercase L ends a visual line without adding time or joining note fragments.
+ * Optional TEMPO/TEMP and TSIG header lines set timing before any notes.
  * start/end are original source offsets (end exclusive); token is compact.
  * Valid notes remain available for editing when errors exist. Playback callers
  * must check errors before using this timeline.
@@ -31,16 +85,28 @@ export function pitchFor(hole, draw = false, slider = false) {
 export function parseNotation(source) {
   if (typeof source !== 'string') throw new TypeError('Notation must be text.');
 
+  const headers = parseHeaders(source);
   let compact = '';
   const offsets = [];
+  let directiveIndex = 0;
   for (let i = 0; i < source.length; i += 1) {
+    const directive = headers.directives[directiveIndex];
+    if (directive && i === directive.start) {
+      // A boundary prevents note fragments on either side of an invalid,
+      // misplaced header from being joined when whitespace is removed.
+      compact += 'L';
+      offsets.push(i);
+      i = directive.end - 1;
+      directiveIndex += 1;
+      continue;
+    }
     if (/\s/.test(source[i]) || source[i] === '|') continue;
     compact += source[i];
     offsets.push(i);
   }
 
   const notes = [];
-  const errors = [];
+  const errors = [...headers.errors];
   let cursor = 0;
   let totalBeats = 0;
   const isDigit = (character) => character !== undefined && /[0-9]/.test(character);
@@ -121,7 +187,8 @@ export function parseNotation(source) {
     totalBeats += beats;
   }
 
-  return { notes, errors, totalBeats };
+  errors.sort((first, second) => first.start - second.start);
+  return { notes, errors, totalBeats, tempo: headers.tempo, numerator: headers.numerator, denominator: headers.denominator, directives: headers.directives };
 }
 
 /** Format a nonnegative elapsed duration as minutes:seconds. */

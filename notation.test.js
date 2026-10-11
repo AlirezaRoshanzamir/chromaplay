@@ -2,6 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { parseNotation, pitchFor, formatDuration } from './notation.js';
 
+const emptyScore = { notes: [], errors: [], totalBeats: 0, tempo: 60, numerator: 4, denominator: 4, directives: [] };
+
 test('parses adjoining notes, explicit blow, draw, slider, and every duration', () => {
   const result = parseNotation('1w+2h-3#q12e-12s');
   assert.deepEqual(result.errors, []);
@@ -39,7 +41,7 @@ test('L preserves source ranges with leading, repeated, and trailing line marker
   assert.equal(result.totalBeats, 5.75);
   assert.deepEqual(result.notes.map(({ token }) => token), ['-3#w', '12e.', '0q']);
   assert.deepEqual(result.notes.map(({ start, end }) => source.slice(start, end)), ['- 3 # w', '1 2 e .', '0 q']);
-  assert.deepEqual(parseNotation('L L\nLL | L'), { notes: [], errors: [], totalBeats: 0 });
+  assert.deepEqual(parseNotation('L L\nLL | L'), emptyScore);
 });
 
 test('L never joins malformed note fragments and recovery stops at each line boundary', () => {
@@ -115,8 +117,93 @@ test('errors preserve source ranges while later valid notes remain editable', ()
 });
 
 test('empty input and separators are valid empty compositions', () => {
-  assert.deepEqual(parseNotation(''), { notes: [], errors: [], totalBeats: 0 });
-  assert.deepEqual(parseNotation(' | \n\t | '), { notes: [], errors: [], totalBeats: 0 });
+  assert.deepEqual(parseNotation(''), emptyScore);
+  assert.deepEqual(parseNotation(' | \n\t | '), emptyScore);
+});
+
+test('score headers set timing without becoming notes or contributing beats', () => {
+  const source = 'TEMPO 120\nTSIG 6/8\n1q-3#eL0h';
+  const result = parseNotation(source);
+  assert.deepEqual(result.errors, []);
+  assert.equal(result.tempo, 120);
+  assert.equal(result.numerator, 6);
+  assert.equal(result.denominator, 8);
+  assert.equal(result.totalBeats, 3.5);
+  assert.deepEqual(result.notes.map(({ token, index, id, startBeat }) => ({ token, index, id, startBeat })), [
+    { token: '1q', index: 0, id: 'note-0', startBeat: 0 },
+    { token: '-3#e', index: 1, id: 'note-1', startBeat: 1 },
+    { token: '0h', index: 2, id: 'note-2', startBeat: 1.5 },
+  ]);
+  assert.deepEqual(result.notes.map(({ start, end }) => source.slice(start, end)), ['1q', '-3#e', '0h']);
+  assert.deepEqual(result.directives.map(({ kind, start, end, valid }) => ({ kind, text: source.slice(start, end), valid })), [
+    { kind: 'tempo', text: 'TEMPO 120', valid: true },
+    { kind: 'time-signature', text: 'TSIG 6/8', valid: true },
+  ]);
+});
+
+test('headers accept TEMP alias, mixed case, blank lines, spaces and CRLF', () => {
+  const source = '\r\n  tSiG\t 12 / 16  \r\n\r\n\tTeMp  90\r\n\t- 3 # q \r\nL 2h';
+  const result = parseNotation(source);
+  assert.deepEqual(result.errors, []);
+  assert.deepEqual([result.tempo, result.numerator, result.denominator], [90, 12, 16]);
+  assert.deepEqual(result.notes.map(({ start, end }) => source.slice(start, end)), ['- 3 # q', '2h']);
+  assert.deepEqual(result.notes.map(({ index, startBeat }) => [index, startBeat]), [[0, 0], [1, 1]]);
+});
+
+test('each header is optional and missing values use tempo 60 and 4/4', () => {
+  for (const [source, expected] of [
+    ['1q', [60, 4, 4]],
+    ['TEMPO 30\n1q', [30, 4, 4]],
+    ['TEMPO 300\n1q', [300, 4, 4]],
+    ['TSIG 32/2\n1q', [60, 32, 2]],
+    ['TSIG 1/16', [60, 1, 16]],
+  ]) {
+    const result = parseNotation(source);
+    assert.deepEqual(result.errors, [], source);
+    assert.deepEqual([result.tempo, result.numerator, result.denominator], expected, source);
+  }
+});
+
+test('malformed headers stay outside the timeline and report their source ranges', () => {
+  for (const header of ['TEMPO', 'TEMPO120', 'TEMP 1q', 'TEMPO 29', 'TEMPO 301', 'TEMPO 60.5', 'TEMPO -60',
+    'TSIG', 'TSIG6/8', 'TSIG 0/4', 'TSIG 33/4', 'TSIG 4/3', 'TSIG 4.5/4', 'TSIG 4/4 2q', 'TSIG 4/']) {
+    const source = `  ${header}\n-3#q`;
+    const result = parseNotation(source);
+    assert.equal(result.errors.length, 1, header);
+    assert.equal(source.slice(result.errors[0].start, result.errors[0].end), header);
+    assert.deepEqual(result.notes.map(({ token }) => token), ['-3#q'], header);
+    assert.equal(result.totalBeats, 1, header);
+    assert.deepEqual([result.tempo, result.numerator, result.denominator], [60, 4, 4], header);
+    assert.equal(result.directives[0].valid, false, header);
+  }
+});
+
+test('duplicate headers include the TEMP alias and do not replace earlier settings', () => {
+  const result = parseNotation('TEMPO 120\nTEMP 90\nTSIG 6/8\nTSIG 3/4\n1q');
+  assert.equal(result.errors.length, 2);
+  assert.ok(result.errors.every(error => error.message.startsWith('Use only one')));
+  assert.deepEqual([result.tempo, result.numerator, result.denominator], [120, 6, 8]);
+  assert.deepEqual(result.directives.map(({ valid }) => valid), [true, false, true, false]);
+  assert.equal(result.totalBeats, 1);
+});
+
+test('headers after notes or beside notes report placement errors without eating neighboring notes', () => {
+  const source = '1q\nTEMPO 90\n2q TSIG 3/4\n-3h';
+  const result = parseNotation(source);
+  assert.equal(result.errors.length, 2);
+  assert.ok(result.errors.every(error => error.message.includes('before the notes')));
+  assert.deepEqual(result.errors.map(({ start, end }) => source.slice(start, end)), ['TEMPO 90', 'TSIG 3/4']);
+  assert.deepEqual(result.notes.map(({ token }) => token), ['1q', '2q', '-3h']);
+  assert.deepEqual([result.tempo, result.numerator, result.denominator], [60, 4, 4]);
+  assert.equal(result.totalBeats, 4);
+});
+
+test('a misplaced header cannot join incomplete note fragments across its line', () => {
+  const result = parseNotation('1\nTEMPO 120\nq\n2e');
+  assert.deepEqual(result.notes.map(({ token }) => token), ['2e']);
+  assert.equal(result.errors.length, 3);
+  assert.ok(result.errors[0].start < result.errors[1].start);
+  assert.ok(result.errors[1].start < result.errors[2].start);
 });
 
 test('pitch inputs and duration formatting handle boundary values', () => {

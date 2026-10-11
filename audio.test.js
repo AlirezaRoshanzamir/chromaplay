@@ -16,6 +16,7 @@ class FakeNode {
     this.kind = kind;
     this.gain = new FakeParameter();
     this.frequency = new FakeParameter();
+    this.playbackRate = new FakeParameter();
     this.stops = [];
     this.connections = [];
   }
@@ -369,4 +370,135 @@ test('score play, pause, and stop release held manual notes and cancel pending m
       assert.equal(audio._manualVoice, null);
     });
   }
+});
+
+const sampleMetadata = {
+  fluid: { samples: [{ midi: 60, start: 0, loopStart: 0.5, loopEnd: 1.6 }, { midi: 72, start: 2, loopStart: 2.5, loopEnd: 3.6 }] },
+  vcsl: { samples: [{ midi: 60, start: 0, loopStart: 0.5, loopEnd: 1.6 }] },
+};
+
+function mockSamples(t, responseForAudio = () => ({ ok: true, arrayBuffer: async () => new ArrayBuffer(8) })) {
+  return t.mock.method(globalThis, 'fetch', async url => String(url).endsWith('.json')
+    ? { ok: true, json: async () => sampleMetadata }
+    : responseForAudio(String(url)));
+}
+
+test('sampled score notes use pitched sustain loops, shared mute gain, and accurate pause/resume durations', async t => {
+  const fetchMock = mockSamples(t);
+  const audio = makeAudio(t);
+  assert.equal(await audio.setInstrument('fluid'), true);
+  await audio.play({ notes: score, bpm: 60 });
+  const voice = [...audio._voices].find(voice => voice.type === 'note');
+  assert.equal(voice.source.kind, 'buffer');
+  assert.equal(voice.source.loop, true);
+  assert.equal(voice.source.loopStart, 0.5);
+  assert.equal(voice.source.loopEnd, 1.6);
+  assert.equal(voice.source.offset, 0);
+  assert.equal(voice.source.playbackRate.events[0].value, 1);
+  close(voice.source.stops[0], 2.04);
+  assert.equal(voice.gain.connections[0], audio._noteGain);
+  audio.setNoteMuted(true);
+  assert.equal(audio._noteGain.gain.events.at(-1).value, 0);
+  audio._context.currentTime = 1.035;
+  close(audio.pause(), 1);
+  assert.equal(voice.source.disconnected, true);
+  await audio.play({ notes: score, bpm: 60, fromBeat: 3 });
+  const resumed = [...audio._voices].find(voice => voice.type === 'note');
+  close(resumed.source.playbackRate.events[0].value, 2 ** (2 / 12));
+  close(resumed.source.stops[0] - resumed.source.startTime, 5.005);
+  await audio.setInstrument('synth');
+  await audio.setInstrument('fluid');
+  assert.equal(fetchMock.mock.callCount(), 2, 'the decoded bank is cached');
+});
+
+test('sampled manual notes sustain until release, including beyond the recorded sample duration', async t => {
+  mockSamples(t);
+  const audio = makeAudio(t);
+  await audio.setInstrument('vcsl');
+  await audio.startManualNote(61);
+  const voice = audio._manualVoice;
+  assert.equal(voice.source.loop, true);
+  close(voice.source.playbackRate.events[0].value, 2 ** (1 / 12));
+  assert.equal(voice.source.stops.length, 0);
+  audio._context.currentTime = 30;
+  audio.stopManualNote();
+  close(voice.gain.gain.events.at(-2).value, 0.8);
+  close(voice.source.stops[0], 30.05);
+});
+
+test('selecting sounds out of order cannot replace the latest selection or start a stale manual note', async t => {
+  let releaseFluid;
+  let startedFluid;
+  const waiting = new Promise(resolve => { startedFluid = resolve; });
+  mockSamples(t, url => url.endsWith('/fluid.wav')
+    ? new Promise(resolve => {
+      releaseFluid = () => resolve({ ok: true, arrayBuffer: async () => new ArrayBuffer(8) });
+      startedFluid();
+    })
+    : { ok: true, arrayBuffer: async () => new ArrayBuffer(8) });
+  const audio = makeAudio(t);
+  const first = audio.setInstrument('fluid');
+  await waiting;
+  const manual = audio.startManualNote(60);
+  assert.equal(await audio.setInstrument('vcsl'), true);
+  const bank = audio._instrumentData;
+  releaseFluid();
+  assert.equal(await first, false);
+  assert.equal(await manual, false);
+  assert.equal(audio.instrument, 'vcsl');
+  assert.equal(audio._instrumentData, bank);
+  assert.equal(audio._context.nodes.length, 0);
+});
+
+test('stopping while samples load cancels both pending score and manual starts', async t => {
+  let release;
+  let started;
+  const waiting = new Promise(resolve => { started = resolve; });
+  mockSamples(t, () => new Promise(resolve => {
+    release = () => resolve({ ok: true, arrayBuffer: async () => new ArrayBuffer(8) });
+    started();
+  }));
+  const audio = makeAudio(t);
+  const selection = audio.setInstrument('fluid');
+  await waiting;
+  const playing = audio.play({ notes: score, bpm: 60 });
+  const manual = audio.startManualNote(60);
+  audio.stop();
+  release();
+  await selection;
+  await playing;
+  assert.equal(await manual, false);
+  assert.equal(audio.isPlaying, false);
+  assert.equal(audio._context.nodes.length, 0);
+});
+
+test('a failed sample download never silently plays the prior instrument and Play can retry it', async t => {
+  let fail = true;
+  mockSamples(t, () => ({ ok: !fail, arrayBuffer: async () => new ArrayBuffer(8) }));
+  const audio = makeAudio(t);
+  await assert.rejects(audio.setInstrument('fluid'), /could not load/);
+  assert.equal(audio.instrument, 'fluid');
+  await assert.rejects(audio.play({ notes: score, bpm: 60 }), /could not load/);
+  assert.equal(audio.isPlaying, false);
+  assert.equal(audio._context.nodes.length, 0);
+  fail = false;
+  assert.equal(await audio.startManualNote(60), true, 'a retry does not cancel its own manual start');
+  assert.equal(audio._manualVoice.source.kind, 'buffer');
+  assert.equal(audio.instrument, 'fluid');
+});
+
+test('a failed older sound request does not surface an error after a newer choice succeeds', async t => {
+  let failFluid;
+  let started;
+  const waiting = new Promise(resolve => { started = resolve; });
+  mockSamples(t, () => new Promise((resolve, reject) => { failFluid = reject; started(); }));
+  const audio = makeAudio(t);
+  const pending = audio.setInstrument('fluid');
+  await waiting;
+  assert.equal(await audio.setInstrument('synth'), true);
+  failFluid(new Error('network failed'));
+  assert.equal(await pending, false);
+  assert.equal(audio.instrument, 'synth');
+  await audio.startManualNote(60);
+  assert.equal(audio._manualVoice.source.kind, 'oscillator');
 });
