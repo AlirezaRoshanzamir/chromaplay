@@ -1,9 +1,11 @@
 import { parseNotation } from './notation.js';
 
 export const DEFAULT_PROJECT = Object.freeze({
-  version: 1,
+  version: 2,
   title: 'Morning warm-up',
   notation: [
+    'TEMPO 90',
+    'TSIG 4/4',
     '1q -1q 2q -2q | 3q -3q -4q 4q',
     '5q -4q -3q 3q | -2q 2q -1q 1q',
     '1e -1e 2e -2e 3e -3e -4e 4e | 4q -4q -3q 3q',
@@ -12,6 +14,7 @@ export const DEFAULT_PROJECT = Object.freeze({
   tempo: 90,
   numerator: 4,
   denominator: 4,
+  instrument: 'synth',
   backgroundOffset: 0,
   noteVolume: 70,
   backgroundVolume: 65,
@@ -31,6 +34,36 @@ function checkNumber(value, field, minimum, maximum, integer = false) {
   }
 }
 
+/** Move old playback settings into the score once, when a version 1 file opens. */
+function migrateLegacyNotation(input) {
+  let notation = input.notation;
+  const { directives } = parseNotation(notation);
+  const tempoHeader = directives.find((directive) => directive.kind === 'tempo');
+  const signatureHeader = directives.some((directive) => directive.kind === 'time-signature');
+  if (!signatureHeader && (Object.hasOwn(input, 'numerator') || Object.hasOwn(input, 'denominator'))) {
+    const numerator = Object.hasOwn(input, 'numerator') ? input.numerator : 4;
+    const denominator = Object.hasOwn(input, 'denominator') ? input.denominator : 4;
+    checkNumber(numerator, 'Time signature numerator', 1, 32, true);
+    if (![2, 4, 8, 16].includes(denominator)) {
+      throw new Error('The time signature denominator must be 2, 4, 8, or 16.');
+    }
+    const line = `TSIG ${numerator}/${denominator}\n`;
+    if (tempoHeader) {
+      const end = tempoHeader.end;
+      const newline = /^(?:\r\n|\n|\r)/.exec(notation.slice(end));
+      const insertAt = end + (newline?.[0].length || 0);
+      notation = `${notation.slice(0, insertAt)}${newline ? '' : '\n'}${line}${notation.slice(insertAt)}`;
+    } else {
+      notation = line + notation;
+    }
+  }
+  if (!tempoHeader && Object.hasOwn(input, 'tempo')) {
+    checkNumber(input.tempo, 'Tempo', 30, 300, true);
+    notation = `TEMPO ${input.tempo}\n${notation}`;
+  }
+  return notation;
+}
+
 /** Validate and copy known project fields. This never retains audio or unknown data. */
 export function validateProject(input, { allowInvalidNotation = false } = {}) {
   if (input === null || typeof input !== 'object' || Array.isArray(input)) {
@@ -39,8 +72,8 @@ export function validateProject(input, { allowInvalidNotation = false } = {}) {
   if (Object.hasOwn(input, 'format') && input.format !== PROJECT_FORMAT) {
     throw new Error('This file is not a ChromaPlay project.');
   }
-  if (Object.hasOwn(input, 'version') && input.version !== 1) {
-    throw new Error('This project version is not supported. Use a version 1 project.');
+  if (Object.hasOwn(input, 'version') && ![1, 2].includes(input.version)) {
+    throw new Error('This project version is not supported. Use a version 1 or 2 project.');
   }
   if (!Object.hasOwn(input, 'notation') || typeof input.notation !== 'string') {
     throw new Error('The project must include notation as text.');
@@ -53,13 +86,13 @@ export function validateProject(input, { allowInvalidNotation = false } = {}) {
   for (const field of Object.keys(DEFAULT_PROJECT)) {
     project[field] = Object.hasOwn(input, field) ? input[field] : DEFAULT_PROJECT[field];
   }
+  project.version = 2;
+  project.notation = input.version === 2 ? input.notation : migrateLegacyNotation(input);
   if (typeof project.title !== 'string' || project.title.length > 100) {
     throw new Error('The title must be text with 100 characters or fewer.');
   }
-  checkNumber(project.tempo, 'Tempo', 30, 300, true);
-  checkNumber(project.numerator, 'Time signature numerator', 1, 32, true);
-  if (![2, 4, 8, 16].includes(project.denominator)) {
-    throw new Error('The time signature denominator must be 2, 4, 8, or 16.');
+  if (!['synth', 'fluid', 'vcsl'].includes(project.instrument)) {
+    throw new Error('Choose Synthesized reed, FluidR3 harmonica, or VCSL chromatic harmonica.');
   }
   checkNumber(project.backgroundOffset, 'Background offset', -600, 600);
   checkNumber(project.noteVolume, 'Note volume', 0, 100);
@@ -71,10 +104,13 @@ export function validateProject(input, { allowInvalidNotation = false } = {}) {
     }
   }
 
+  const parsed = parseNotation(project.notation);
+  project.tempo = parsed.tempo;
+  project.numerator = parsed.numerator;
+  project.denominator = parsed.denominator;
   if (!allowInvalidNotation) {
-    const { errors } = parseNotation(project.notation);
-    if (errors.length) {
-      const error = errors[0];
+    if (parsed.errors.length) {
+      const error = parsed.errors[0];
       const precedingLines = project.notation.slice(0, error.start).split('\n');
       const line = precedingLines.length;
       const column = precedingLines[line - 1].length + 1;

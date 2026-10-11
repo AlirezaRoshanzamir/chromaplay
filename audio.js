@@ -1,3 +1,5 @@
+import { isInstrument, loadInstrument, nearestSample } from './instrument.js';
+
 const LOOKAHEAD_SECONDS = 0.2;
 const SCHEDULER_INTERVAL_MS = 25;
 const START_DELAY_SECONDS = 0.035;
@@ -36,6 +38,52 @@ export class PracticeAudio {
     this._bpm = 100;
     this._timer = null;
     this._endTimer = null;
+    this.instrument = 'synth';
+    this._instrumentLoadId = 0;
+    this._instrumentData = null;
+    this._instrumentError = false;
+    this._instrumentReady = Promise.resolve(null);
+  }
+
+  /** Select a sound. A superseded request returns false and cannot replace the current sound. */
+  async setInstrument(id) {
+    return this._loadSelectedInstrument(id, true);
+  }
+
+  async _loadSelectedInstrument(id, stopManual) {
+    if (!isInstrument(id)) throw new Error('Choose a supported harmonica sound.');
+    const loadId = ++this._instrumentLoadId;
+    this.instrument = id;
+    if (stopManual) this.stopManualNote();
+    this._instrumentData = null;
+    this._instrumentError = false;
+    const pending = id === 'synth' ? Promise.resolve(null)
+      : Promise.resolve().then(() => loadInstrument(this._ensureContext(), id));
+    this._instrumentReady = pending;
+    try {
+      const data = await pending;
+      if (loadId !== this._instrumentLoadId) return false;
+      this._instrumentData = data;
+      return true;
+    } catch (error) {
+      if (loadId !== this._instrumentLoadId) return false;
+      this._instrumentError = true;
+      throw error;
+    }
+  }
+
+  async prepareInstrument() {
+    // A new selection can arrive while the preceding files are being decoded.
+    while (true) {
+      if (this._instrumentError) await this._loadSelectedInstrument(this.instrument, false);
+      const loadId = this._instrumentLoadId;
+      try {
+        await this._instrumentReady;
+      } catch (error) {
+        if (loadId === this._instrumentLoadId) throw error;
+      }
+      if (loadId === this._instrumentLoadId) return;
+    }
   }
 
   _ensureContext() {
@@ -81,7 +129,7 @@ export class PracticeAudio {
     }
 
     const context = this._ensureContext();
-    await context.resume();
+    await Promise.all([context.resume(), this.prepareInstrument()]);
     // A pause, stop, or newer play request may arrive while the browser resumes audio.
     if (generation !== this._generation) return;
     this._startBeat = this._position;
@@ -125,22 +173,21 @@ export class PracticeAudio {
     this.stopManualNote();
     const generation = this._manualGeneration;
     const context = this._ensureContext();
-    await context.resume();
+    await Promise.all([context.resume(), this.prepareInstrument()]);
     if (generation !== this._manualGeneration) return false;
 
     const start = context.currentTime + 0.002;
-    const source = context.createOscillator();
+    const { source, level, offset } = this._createNoteSource(midi, start);
     const gain = context.createGain();
-    source.setPeriodicWave(this._reedWave);
-    source.frequency.setValueAtTime(440 * 2 ** ((midi - 69) / 12), start);
     gain.gain.setValueAtTime(0, start);
-    gain.gain.linearRampToValueAtTime(NOTE_GAIN, start + MANUAL_ATTACK_SECONDS);
+    gain.gain.linearRampToValueAtTime(level, start + MANUAL_ATTACK_SECONDS);
     source.connect(gain);
     gain.connect(this._noteGain);
     const voice = this._trackVoice(source, gain, 'manual');
     voice.startedAt = start;
+    voice.level = level;
     this._manualVoice = voice;
-    source.start(start);
+    source.start(start, offset);
     return true;
   }
 
@@ -278,22 +325,39 @@ export class PracticeAudio {
   _scheduleNote(midi, start, end) {
     if (end <= start) return;
     const context = this._context;
-    const source = context.createOscillator();
+    const { source, level, offset } = this._createNoteSource(midi, start);
     const gain = context.createGain();
-    source.setPeriodicWave(this._reedWave);
-    source.frequency.setValueAtTime(440 * 2 ** ((midi - 69) / 12), start);
     const duration = end - start;
     const attack = Math.min(0.014, duration / 3);
     const release = Math.min(0.045, duration / 3);
     gain.gain.setValueAtTime(0, start);
-    gain.gain.linearRampToValueAtTime(NOTE_GAIN, start + attack);
-    gain.gain.setValueAtTime(NOTE_GAIN, end - release);
+    gain.gain.linearRampToValueAtTime(level, start + attack);
+    gain.gain.setValueAtTime(level, end - release);
     gain.gain.linearRampToValueAtTime(0, end);
     source.connect(gain);
     gain.connect(this._noteGain);
     this._trackVoice(source, gain, 'note');
-    source.start(start);
+    source.start(start, offset);
     source.stop(end + 0.005);
+  }
+
+  _createNoteSource(midi, start) {
+    const context = this._context;
+    if (this.instrument === 'synth') {
+      const source = context.createOscillator();
+      source.setPeriodicWave(this._reedWave);
+      source.frequency.setValueAtTime(440 * 2 ** ((midi - 69) / 12), start);
+      return { source, level: NOTE_GAIN, offset: 0 };
+    }
+    if (!this._instrumentData) throw new Error('The selected harmonica sound is still loading.');
+    const sample = nearestSample(this._instrumentData, midi);
+    const source = context.createBufferSource();
+    source.buffer = this._instrumentData.buffer;
+    source.playbackRate.setValueAtTime(2 ** ((midi - sample.midi) / 12), start);
+    source.loop = true;
+    source.loopStart = sample.loopStart;
+    source.loopEnd = sample.loopEnd;
+    return { source, level: 0.8, offset: sample.start };
   }
 
   _scheduleClick(start, accent) {
@@ -348,7 +412,7 @@ export class PracticeAudio {
     voice.releasing = true;
     const now = this._context.currentTime;
     // Account for release during the attack so quick taps do not jump in volume.
-    const level = NOTE_GAIN * Math.min(1, Math.max(0, (now - voice.startedAt) / MANUAL_ATTACK_SECONDS));
+    const level = voice.level * Math.min(1, Math.max(0, (now - voice.startedAt) / MANUAL_ATTACK_SECONDS));
     voice.gain.gain.cancelScheduledValues(now);
     voice.gain.gain.setValueAtTime(level, now);
     voice.gain.gain.linearRampToValueAtTime(0, now + MANUAL_RELEASE_SECONDS);

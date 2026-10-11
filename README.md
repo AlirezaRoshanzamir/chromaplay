@@ -13,7 +13,8 @@ Follow the falling notes or play the harmonica directly with your mouse and keyb
 - A simple notation language for holes, blow/draw, the slider, note lengths, and rests.
 - An inline score editor with duration-sized note boxes, breath colors, and a moving playhead.
 - A falling-note visualizer across all 12 holes, with adjustable height and labels for short notes.
-- Adjustable tempo and time signature, a metronome, looping, seeking, and note-by-note navigation.
+- Tempo and time signature written directly in the score, a metronome, looping, seeking, and note-by-note navigation.
+- Three sounds: synthesized reed, FluidR3 harmonica, and recorded VCSL chromatic harmonica.
 - A playable harmonica with mouse, touch, and keyboard controls.
 - Local backing tracks with separate volume and positive or negative start offsets.
 - Independent mute controls for notes and backing audio, available during playback.
@@ -27,8 +28,8 @@ Open the [live app](https://alirezaroshanzamir.github.io/chromaplay/), try the i
 
 1. Choose **Blank score** from the example menu, or edit the existing notes.
 2. Enter notation such as `1q -1q 2q -2q | 3h 0h`.
-3. Set the tempo and time signature.
-4. Press **Play** and follow the notes. Add a backing track if you want to play along.
+3. Add `TEMPO 90` and `TSIG 4/4` on their own lines at the top to set the tempo and meter. Without headers, the score uses 60 BPM and 4/4.
+4. Choose a sound, press **Play**, and follow the notes. Add a backing track if you want to play along.
 
 Editing notation pauses playback and returns to the beginning. Invalid notation is highlighted and must be fixed before playback or export.
 
@@ -45,6 +46,16 @@ npm run dev
 Open [http://127.0.0.1:5173](http://127.0.0.1:5173). The local server serves static files only. Use HTTP rather than opening `index.html` directly, because browsers can block JavaScript modules loaded from a file URL.
 
 ## Writing notes
+
+Start a score with optional tempo and time signature headers:
+
+```text
+TEMPO 90
+TSIG 4/4
+1q -1q 2q -2q | 3h 0h
+```
+
+Keep each header on its own line before the notes. Either header may be omitted; defaults are `TEMPO 60` and `TSIG 4/4`. `TEMP` is also accepted as an alias for `TEMPO`. These settings stay in copied and exported notation.
 
 Each note has this form:
 
@@ -77,7 +88,7 @@ A dotted quarter note (`1q.`) lasts 1.5 quarter-note beats. Dots also work with 
 
 ### Spacing and line breaks
 
-Spaces, tabs, newlines, and `|` do not affect playback, even when placed inside a note. These examples sound the same:
+Within the notes, spaces, tabs, newlines, and `|` do not affect playback, even when placed inside a note. Tempo and time signature headers need their own lines. These note examples sound the same:
 
 ```text
 1q -1q 2q -2q | 3h 0h
@@ -134,13 +145,35 @@ Manual playing works with an empty score and uses the **Notes** volume and mute 
 
 The instrument uses standard C solo tuning, following the [HOHNER tuning chart](https://hohner.de/fileadmin/documents/instruments/harmonicas/2025_tuning_chart.pdf). Blow notes run from C4 to C7. The slider normally raises pitch by one semitone. The standard top-hole exception is draw hole 12 with the slider pressed (`-12#q`), which sounds D7.
 
-The `#` symbol means press the slider; it is not a written pitch accidental. Audio comes from an approximate reed tone synthesized with Web Audio, rather than recorded harmonica samples.
+The `#` symbol means press the slider; it is not a written pitch accidental.
+
+Use the sound menu to choose the tone for score playback and manually played holes:
+
+| Sound | Source |
+| --- | --- |
+| Synthesized reed | ChromaPlay's original tone, generated with Web Audio |
+| FluidR3 harmonica | Sampled General MIDI harmonica from FluidR3 |
+| VCSL chromatic harmonica | Normal sustain recordings of a Hohner Super64 chromatic harmonica |
+
+The two sample sets are bundled with the app and load when selected. They use recorded anchor pitches and adjust playback speed for notes between them. Sustain loops let a note play for its full written duration or as long as you hold a hole. These recordings provide a tone for each pitch, rather than a separate recording for every hole, breath, and slider combination.
+
+The selected sound autosaves and is included in exported projects. Sample loading needs no CDN or third-party JavaScript library. See [sound credits and licenses](CREDITS.md) for the recording sources, FluidR3 attribution, and VCSL's CC0 license.
 
 ## Tempo and playback
 
-Tempo accepts **30-300 BPM** and always counts quarter notes, including in `6/8`. At 60 BPM, a quarter note lasts one second and an eighth note lasts half a second.
+Write `TEMPO number` and `TSIG numerator/denominator` at the top of the score, before any notes. The headers can appear in either order, with one setting per line. Duplicate settings and headers placed after notes are reported as errors. `TEMP` is accepted as a shorter spelling of `TEMPO`.
 
-Time signatures accept a numerator of **1-32** and a denominator of **2, 4, 8, or 16**. They control visual bar lines and metronome pulses and accents without changing written note lengths. A `6/8` bar contains three quarter-note beats and six eighth-note metronome pulses.
+```text
+TEMPO 70
+TSIG 6/8
+1q. 2e 3e 2e | -1q. -2q.
+```
+
+Tempo defaults to **60 BPM**, accepts whole numbers from **30-300**, and always counts quarter notes, including in `6/8`. At 60 BPM, a quarter note lasts one second and an eighth note lasts half a second.
+
+The time signature defaults to **4/4**. It accepts a numerator of **1-32** and a denominator of **2, 4, 8, or 16**. It controls visual bar lines and metronome pulses and accents without changing written note lengths. A `6/8` bar contains three quarter-note beats and six eighth-note metronome pulses.
+
+Tempo and meter are part of the score rather than separate playback controls. Removing a header restores that setting's default. Older saved projects keep their timing: ChromaPlay adds their existing tempo and time signature as score headers when first opening them.
 
 Use **Previous** and **Next** to move through notes and rests, **Restart** to return to the beginning, or the progress bar to seek. **Pause** stops both notes and backing audio. **Loop** repeats the score. Both audio parts stop at the end of the score.
 
@@ -182,8 +215,8 @@ A negative offset provides a lead-in when playing from the beginning or restarti
 
 The current score and settings autosave to this browser's local storage, including unfinished notation. Storage belongs to the browser and site address. Clearing browser data removes it, and scores saved at another ChromaPlay address do not appear here automatically. Use export/import to move them.
 
-- **Export score** downloads a `.chroma.json` file with the title, notation, tempo, time signature, track offset, volumes, mute settings, metronome, and loop settings.
-- **Import** accepts `.json` and `.chroma` projects, or `.txt` notation. Text imports use default settings and the filename as the title.
+- **Export score** downloads a `.chroma.json` file with the title, notation and its tempo/meter headers, sound choice, track offset, volumes, mute settings, metronome, and loop settings.
+- **Import** accepts `.json` and `.chroma` projects, or `.txt` notation. Text imports keep tempo/meter headers, use defaults for omitted settings, and use the filename as the title. Version 1 projects are migrated to the current format automatically.
 - Imports validate notation and settings before replacing the score. Score files are limited to **1 MB**, and notation to **100,000 characters**.
 
 Backing audio stays in the current tab. It is not saved in local storage or included in an exported score. Select the file again after reloading the app or opening a score in another tab.
@@ -205,7 +238,9 @@ npm run build
 | `notation.js` | Notation parser and pitch mapping |
 | `note-editor.js` | Inline editing and score playhead |
 | `note-style.js` | Note colors and duration widths |
-| `audio.js` | Web Audio synthesis and synchronized playback |
+| `audio.js` | Web Audio synthesis, sampled instruments, and synchronized playback |
+| `instrument.js`, `assets/sounds/` | Bundled harmonica recordings, loading, pitch mapping, and sample licenses |
+| `tools/prepare-samples.py` | Optional script for rebuilding the bundled recordings |
 | `manual-play.js` | Mouse, touch, and keyboard instrument controls |
 | `visualizer.js` | Falling-note canvas display |
 | `project.js` | Project validation, import, and export |
