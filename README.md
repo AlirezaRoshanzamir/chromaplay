@@ -17,6 +17,7 @@ Follow the falling notes or play the harmonica directly with your mouse and keyb
 - Three sounds: synthesized reed, FluidR3 harmonica, and recorded VCSL chromatic harmonica.
 - A playable harmonica with mouse, touch, and keyboard controls.
 - Compact Notes, Track, and Metronome waveform rows on one zoomable timeline, each with its own volume and start delay.
+- Global playback speed from 0.25x to 2x, keeping notes, backing audio, metronome, and visuals aligned without changing pitch.
 - Local backing tracks that can play alongside a score or on their own.
 - Plain-text copying, score import/export, and browser autosave.
 
@@ -171,7 +172,7 @@ TSIG 6/8
 1q. 2e 3e 2e | -1q. -2q.
 ```
 
-Tempo defaults to **60 BPM**, accepts whole numbers from **30-300**, and always counts quarter notes, including in `6/8`. At 60 BPM, a quarter note lasts one second and an eighth note lasts half a second.
+Tempo defaults to **60 BPM**, accepts whole numbers from **30-300**, and always counts quarter notes, including in `6/8`. At 60 BPM and normal playback speed (1x), a quarter note lasts one second and an eighth note lasts half a second.
 
 The time signature defaults to **4/4**. It accepts a numerator of **1-32** and a denominator of **2, 4, 8, or 16**. It controls visual bar lines and metronome pulses and accents without changing written note lengths. A `6/8` bar contains three quarter-note beats and six eighth-note metronome pulses.
 
@@ -182,6 +183,16 @@ Use **Previous** and **Next** to move through notes and rests, **Restart** to re
 The falling-note visualizer follows the score's position within the shared timeline. It continues through any time before the notes begin or after they finish while another part plays. The metronome has its own start delay and volume. Before applying that delay, its length is the longer of the score and backing track, so it can keep time through a track even with an empty score.
 
 Right Arrow moves to the next note and Home restarts when focus is outside the editor, inputs, buttons, and other controls, and the guide is closed. Space is the draw modifier, not a playback shortcut.
+
+### Playback speed
+
+Use the player's **Speed** slider to slow down or speed up the whole practice session from **0.25x to 2x**. The minus/plus buttons change the rate by **0.05x**, and **Reset** restores normal speed (1x). You can change speed while playing and continue from the same position.
+
+Notes, backing audio, metronome, and visual playheads all follow the selected rate. Their pitches stay the same. The score's `TEMPO` header and tempo control stay unchanged, so slowing down for practice does not rewrite the score. Manually held harmonica notes keep their normal pitch and respond to how long you hold them.
+
+The timeline ruler, elapsed/total display, and seek positions remain in the original score seconds. Start delays use those same seconds, keeping all parts aligned at every speed. A 20-second timeline takes 40 seconds to play at 0.5x and 10 seconds at 2x. Likewise, a start delay of 2 source seconds means a 4-second wait at 0.5x. Changing the score tempo still changes the notes and metronome relative to a backing track; use playback speed to slow down or speed up everything together.
+
+Playback speed defaults to **1x**, autosaves, and is included in exported projects. Older projects and plain-text imports start at 1x. Loading an example keeps your current playback speed.
 
 ### Adjusting the visualizer
 
@@ -210,13 +221,13 @@ Start delays range from **-600 to 600 seconds**, including fractions, and defaul
 
 The metronome follows the same rule using its own delay. Pause, resume, and seeking keep all rows aligned. The timeline ends when the last active part finishes after its delay is applied. Anything entirely before zero contributes no playback time. Disabling the metronome removes it from the timeline's length; setting its volume to zero keeps its timing.
 
-All three delays autosave and are included in exported projects. Older projects retain their saved note and track delays. Their metronome initially inherits the former Notes volume and delay; afterward, its controls work independently. Waveform zoom is a display setting and is not included in a score export.
+All three delays autosave and are included in exported projects. Older projects retain their saved note and track delays. Projects from before version 4 initially give the metronome the former Notes volume and delay; afterward, its controls work independently. Waveform zoom is a display setting and is not included in a score export.
 
 ## Backing tracks
 
 Use the short upload row below Notes to choose a local audio file or drop a file there. Supported formats depend on your browser; MP3 and WAV are good starting points. Files can be up to **100 MB**.
 
-Loading a file fills the Track waveform. Adjust its volume and start delay in that row to match the score. The audio plays at its original speed; changing the score tempo does not stretch the track.
+Loading a file fills the Track waveform. Adjust its volume and start delay in that row to match the score. At 1x playback speed, the audio plays at its original speed. The global speed control changes its speed together with the notes and metronome, using the browser's pitch preservation. Changing the score's tempo alone does not stretch the track.
 
 ![The compact backing track upload row with a local file and remove control](docs/screenshots/backing-track.jpg)
 
@@ -226,8 +237,8 @@ Choose a track from your device and adjust its timing in the player.
 
 The current score and settings autosave to this browser's local storage, including unfinished notation. Storage belongs to the browser and site address. Clearing browser data removes it, and scores saved at another ChromaPlay address do not appear here automatically. Use export/import to move them.
 
-- **Export score** downloads a version 4 `.chroma.json` file with the title, notation and its tempo/meter headers, sound choice, all three start delays and volumes, metronome on/off, and loop settings.
-- **Import** accepts `.json` and `.chroma` projects, or `.txt` notation. Text imports keep tempo/meter headers, use defaults for omitted settings, and use the filename as the title. Version 1, 2, and 3 projects are migrated to the current format automatically, preserving their notes, selected sound, and existing volumes and delays.
+- **Export score** downloads a version 5 `.chroma.json` file with the title, notation and its tempo/meter headers, sound choice, playback speed, all three start delays and volumes, metronome on/off, and loop settings.
+- **Import** accepts `.json` and `.chroma` projects, or `.txt` notation. Text imports keep tempo/meter headers, use defaults for omitted settings, and use the filename as the title. Version 1 through 4 projects are migrated to the current format automatically, preserving their notes, selected sound, and existing volumes and delays, with playback speed set to 1x when it was not saved.
 - Imports validate notation and settings before replacing the score. Score files are limited to **1 MB**, and notation to **100,000 characters**.
 
 Backing audio stays in the current tab. It is not saved in local storage or included in an exported score. Select the file again after reloading the app or opening a score in another tab.
@@ -250,6 +261,7 @@ npm run build
 | `note-editor.js` | Inline editing and score playhead |
 | `note-style.js` | Note colors and duration widths |
 | `audio.js` | Web Audio synthesis, sampled instruments, and synchronized playback |
+| `background-player.js` | Browser audio playback with pitch preservation at different speeds |
 | `instrument.js`, `assets/sounds/` | Bundled harmonica recordings, loading, pitch mapping, and sample licenses |
 | `tools/prepare-samples.py` | Optional script for rebuilding the bundled recordings |
 | `manual-play.js` | Mouse, touch, and keyboard instrument controls |

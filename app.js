@@ -48,11 +48,13 @@ let playRequest = 0;
 let frame = null;
 let toastTimer;
 let backgroundRequest = 0;
+let backgroundLoading = false;
 let instrumentRequest = 0;
 let manual;
 const audio = new PracticeAudio({
   onStateChange: ({ isPlaying, beat }) => { position = beat; updateTransport(); if (isPlaying) startFrames(); else cancelFrames(); },
   onEnded: () => { position = timeline.endBeat; renderPosition(); if (project.loop) { position = timeline.startBeat; void startPlayback(); } },
+  onError: error => { pausePlayback(); notify(error.message || 'Backing track playback failed. Try playing again.', true); },
 });
 const visualizer = new HarmonicaVisualizer($('visualizer'), { onSeek: beat => { void seekTo(beat + timeline.noteStartBeat); } });
 const waveforms = new WaveformTimeline($('waveform-timeline'), { onSeek: seconds => { void seekTo(seconds * project.tempo / 60); } });
@@ -171,6 +173,7 @@ function applyProject() {
   $('instrument').value = project.instrument;
   void selectInstrument();
   updateVolumes();
+  updatePlaybackSpeed();
   refreshScore({ reset: true });
 }
 function refreshScore({ reset = false } = {}) {
@@ -259,7 +262,7 @@ function renderPosition() {
     $('current-direction').style.color = note.draw ? '#eab09a' : '#b4edb1';
   } else if (timeline.hasNotes && scoreBeat < 0) {
     $('current-note-title').textContent = 'Getting ready for the notes';
-    $('current-note-detail').textContent = `Your first note in ${(-scoreBeat * 60 / project.tempo).toFixed(1)} seconds`;
+    $('current-note-detail').textContent = `Your first note in ${(-scoreBeat * 60 / project.tempo / project.playbackRate).toFixed(1)} seconds`;
     $('current-direction').innerHTML = icon('headphones');
   } else if (note) {
     const length = { w:'Whole', h:'Half', q:'Quarter', e:'Eighth', s:'Sixteenth' }[note.duration];
@@ -270,11 +273,11 @@ function renderPosition() {
   } else if (timeline.hasBackground && seconds < timeline.backgroundEndSeconds) {
     const waiting = seconds < timeline.backgroundStartSeconds;
     $('current-note-title').textContent = waiting ? 'Getting ready for the track' : 'Backing track';
-    $('current-note-detail').textContent = waiting ? `Track starts in ${(timeline.backgroundStartSeconds - seconds).toFixed(1)} seconds` : audio.background.name;
+    $('current-note-detail').textContent = waiting ? `Track starts in ${((timeline.backgroundStartSeconds - seconds) / project.playbackRate).toFixed(1)} seconds` : audio.background.name;
     $('current-direction').innerHTML = icon('headphones');
   } else if (timeline.hasMetronome && seconds < timeline.metronomeEndSeconds) {
     $('current-note-title').textContent = 'Metronome';
-    $('current-note-detail').textContent = seconds < timeline.metronomeStartSeconds ? `Clicks start in ${(timeline.metronomeStartSeconds - seconds).toFixed(1)} seconds` : `${project.tempo} BPM / ${project.numerator}/${project.denominator}`;
+    $('current-note-detail').textContent = seconds < timeline.metronomeStartSeconds ? `Clicks start in ${((timeline.metronomeStartSeconds - seconds) / project.playbackRate).toFixed(1)} seconds` : `${Number((project.tempo * project.playbackRate).toFixed(2))} BPM / ${project.numerator}/${project.denominator}`;
     $('current-direction').innerHTML = icon('metronome');
   } else {
     const finished = timeline.durationBeats > 0 && position >= timeline.endBeat;
@@ -297,7 +300,7 @@ function updateTransport() {
   $('play-label').textContent = playLabel;
   $('play').setAttribute('aria-label', playLabel);
   const invalid = !!parsed.errors.length || timeline.durationBeats <= 0;
-  $('play').disabled = invalid;
+  $('play').disabled = invalid || backgroundLoading;
   ['restart','seek'].forEach(id => { $(id).disabled = invalid; });
   ['previous','next'].forEach(id => { $(id).disabled = invalid || !timeline.hasNotes; });
   $('play-status').textContent = manual?.note ? 'LIVE PLAY' : playing ? 'FIND YOUR FLOW' : position >= timeline.endBeat && timeline.durationBeats > 0 ? 'ONE MORE TIME?' : position > timeline.startBeat ? 'TAKE YOUR TIME' : 'READY WHEN YOU ARE';
@@ -312,7 +315,7 @@ function cancelFrames() { if (frame !== null) cancelAnimationFrame(frame); frame
 function pausePlayback(stopManual = true) { if (stopManual) manual?.stop(); const beat = audio.isPlaying ? audio.getPosition() : position; playRequest++; pendingPlay = false; audio.pause(); position = beat; renderPosition(); }
 async function startPlayback() {
   noteEditor.commit();
-  if (parsed.errors.length || timeline.durationBeats <= 0) return;
+  if (backgroundLoading || parsed.errors.length || timeline.durationBeats <= 0) return;
   manual.stop();
   const request = ++playRequest;
   if (position >= timeline.endBeat) position = timeline.startBeat;
@@ -323,7 +326,7 @@ async function startPlayback() {
     $('instrument-status').classList.remove('error');
   }
   try {
-    await audio.play({ notes: parsed.notes, bpm: project.tempo, fromBeat: position, noteOffset: project.noteOffset, backgroundOffset: project.backgroundOffset, metronome: project.metronome, metronomeOffset: project.metronomeOffset });
+    await audio.play({ notes: parsed.notes, bpm: project.tempo, playbackRate: project.playbackRate, fromBeat: position, noteOffset: project.noteOffset, backgroundOffset: project.backgroundOffset, metronome: project.metronome, metronomeOffset: project.metronomeOffset });
     if (request === playRequest && project.instrument !== 'synth') $('instrument-status').textContent = 'Ready';
   } catch (error) {
     if (request === playRequest) {
@@ -414,6 +417,31 @@ async function changeTiming(update) {
   refreshScore({ reset: atStart }); save();
   if (wasPlaying && position < timeline.endBeat) await startPlayback();
 }
+function updatePlaybackSpeed() {
+  const rate = project.playbackRate;
+  $('playback-rate').value = rate;
+  $('playback-rate').setAttribute('aria-valuetext', `${rate} times normal speed`);
+  $('playback-rate-value').textContent = `${rate}x`;
+  $('speed-down').disabled = rate <= 0.25;
+  $('speed-up').disabled = rate >= 2;
+  $('speed-reset').disabled = rate === 1;
+  setRangeFill($('playback-rate'));
+}
+async function changePlaybackSpeed(value) {
+  const rate = Math.round(Math.min(2, Math.max(0.25, Number(value) || 1)) * 100) / 100;
+  if (rate === project.playbackRate) return;
+  const wasPlaying = audio.isPlaying || pendingPlay;
+  pausePlayback();
+  project.playbackRate = rate;
+  updatePlaybackSpeed();
+  renderPosition();
+  save();
+  if (wasPlaying && position < timeline.endBeat) await startPlayback();
+}
+$('playback-rate').addEventListener('input', () => { void changePlaybackSpeed($('playback-rate').value); });
+$('speed-down').addEventListener('click', () => { void changePlaybackSpeed(project.playbackRate - 0.05); });
+$('speed-up').addEventListener('click', () => { void changePlaybackSpeed(project.playbackRate + 0.05); });
+$('speed-reset').addEventListener('click', () => { void changePlaybackSpeed(1); });
 async function selectInstrument(resume = false) {
   const request = ++instrumentRequest;
   const playbackRequest = playRequest;
@@ -476,7 +504,7 @@ $('examples').addEventListener('change', () => {
   const example = examples[$('examples').value];
   if (!example) return;
   stopForEdit();
-  project = { ...example, instrument: project.instrument, noteVolume: project.noteVolume, backgroundVolume:project.backgroundVolume, backgroundOffset: project.backgroundOffset, noteOffset: project.noteOffset, metronome: project.metronome, metronomeOffset: project.metronomeOffset, metronomeVolume: project.metronomeVolume };
+  project = { ...example, instrument: project.instrument, playbackRate: project.playbackRate, noteVolume: project.noteVolume, backgroundVolume:project.backgroundVolume, backgroundOffset: project.backgroundOffset, noteOffset: project.noteOffset, metronome: project.metronome, metronomeOffset: project.metronomeOffset, metronomeVolume: project.metronomeVolume };
   applyProject(); save(); $('examples').value = '';
 });
 $('import-button').addEventListener('click', () => $('import-file').click());
@@ -526,6 +554,7 @@ async function loadBackground(file) {
   if (!file) return;
   if (file.size > 100 * 1024 * 1024) { notify('Choose an audio file smaller than 100 MB.', true); return; }
   const request = ++backgroundRequest;
+  backgroundLoading = true;
   pausePlayback();
   $('upload-background').disabled = true;
   $('replace-background').disabled = true;
@@ -536,14 +565,20 @@ async function loadBackground(file) {
     pausePlayback();
     refreshScore({ reset: true });
     notify('Track loaded. Adjust its volume and delay beside the waveform.');
-  } catch { if (request === backgroundRequest) notify('This audio file could not be opened. Try an MP3 or WAV file.', true); }
+  } catch {
+    if (request === backgroundRequest) {
+      pausePlayback();
+      if (!audio.background) refreshScore({ reset: true });
+      notify('This audio file could not be opened. Try an MP3 or WAV file.', true);
+    }
+  }
   finally {
-    if (request === backgroundRequest) { $('upload-background').disabled = false; $('replace-background').disabled = false; $('upload-background').querySelector('strong').textContent = 'Add backing track'; }
+    if (request === backgroundRequest) { backgroundLoading = false; updateTransport(); $('upload-background').disabled = false; $('replace-background').disabled = false; $('upload-background').querySelector('strong').textContent = 'Add backing track'; }
   }
 }
 ['upload-background', 'replace-background'].forEach(id => $(id).addEventListener('click', () => $('background-file').click()));
 $('background-file').addEventListener('change', () => { void loadBackground($('background-file').files[0]); $('background-file').value = ''; });
-$('remove-background').addEventListener('click', () => { backgroundRequest++; pausePlayback(); audio.clearBackground(); $('upload-background').disabled = false; $('replace-background').disabled = false; $('upload-background').querySelector('strong').textContent = 'Add backing track'; refreshScore({ reset: true }); });
+$('remove-background').addEventListener('click', () => { backgroundRequest++; backgroundLoading = false; pausePlayback(); audio.clearBackground(); $('upload-background').disabled = false; $('replace-background').disabled = false; $('upload-background').querySelector('strong').textContent = 'Add backing track'; refreshScore({ reset: true }); });
 ['dragenter','dragover'].forEach(name => $('track-lane').addEventListener(name, event => { event.preventDefault(); $('track-lane').classList.add('drag-over'); }));
 ['dragleave','drop'].forEach(name => $('track-lane').addEventListener(name, event => { event.preventDefault(); $('track-lane').classList.remove('drag-over'); }));
 $('track-lane').addEventListener('drop', event => { void loadBackground(event.dataTransfer.files[0]); });

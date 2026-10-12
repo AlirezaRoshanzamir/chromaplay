@@ -41,6 +41,35 @@ class FakeAudioContext {
   async decodeAudioData() { return { duration: 60 }; }
 }
 
+class FakeBackgroundPlayer {
+  constructor({ audioContext, output, onError }) {
+    this.context = audioContext;
+    this.output = output;
+    this.onError = onError;
+    this.current = null;
+    this.unlocks = 0;
+  }
+  async setFile(file) { this.file = file; return true; }
+  async unlock() { this.unlocks += 1; return true; }
+  async play({ when, offset, playbackRate, endTime }) {
+    const source = new FakeNode('background');
+    source.connect(this.output);
+    source.start(when, offset);
+    source.playbackRate.setValueAtTime(playbackRate, when);
+    source.stop(endTime);
+    this.context.nodes.push(source);
+    this.current = source;
+    return true;
+  }
+  stop() {
+    if (!this.current) return;
+    this.current.stop(this.context.currentTime);
+    this.current.disconnect();
+    this.current = null;
+  }
+  clear() { this.stop(); this.file = null; }
+}
+
 globalThis.AudioContext = FakeAudioContext;
 
 const score = [
@@ -50,7 +79,7 @@ const score = [
 ];
 
 function makeAudio(t, callbacks) {
-  const audio = new PracticeAudio(callbacks);
+  const audio = new PracticeAudio({ backgroundPlayerFactory: options => new FakeBackgroundPlayer(options), ...callbacks });
   t.after(() => audio.stop());
   return audio;
 }
@@ -86,13 +115,13 @@ test('a positive backing offset delays its start and a negative offset seeks int
   const audio = makeAudio(t);
   await addBackground(audio);
   await audio.play({ notes: score, bpm: 120, backgroundOffset: 2 });
-  let source = audio._context.nodes.find(node => node.kind === 'buffer');
+  let source = audio._context.nodes.find(node => node.kind === 'background');
   close(source.startTime, 2.035);
   close(source.offset, 0);
   close(source.stops[0], 62.035);
 
   await audio.play({ notes: score, bpm: 120, backgroundOffset: -1 });
-  source = audio._context.nodes.filter(node => node.kind === 'buffer').at(-1);
+  source = audio._context.nodes.filter(node => node.kind === 'background').at(-1);
   close(source.startTime, 0.035);
   close(source.offset, 1);
 });
@@ -101,7 +130,7 @@ test('negative backing offset skips its prefix and legacy lead-in requests still
   const audio = makeAudio(t);
   await addBackground(audio);
   await audio.play({ notes: score, bpm: 120, backgroundOffset: -1, includeLeadIn: true });
-  let source = audio._context.nodes.find(node => node.kind === 'buffer');
+  let source = audio._context.nodes.find(node => node.kind === 'background');
   close(source.startTime, 0.035);
   close(source.offset, 1);
   close(audio.getPosition(), 0);
@@ -110,7 +139,7 @@ test('negative backing offset skips its prefix and legacy lead-in requests still
   close(audio.pause(), 1);
 
   await audio.play({ notes: score, bpm: 120, fromBeat: 1, backgroundOffset: -1 });
-  source = audio._context.nodes.filter(node => node.kind === 'buffer').at(-1);
+  source = audio._context.nodes.filter(node => node.kind === 'background').at(-1);
   close(source.startTime, 0.57);
   close(source.offset, 1.5);
   close(audio.getPosition(), 1);
@@ -120,7 +149,7 @@ test('seeking seeks backing audio relative to score time, and rests schedule no 
   const audio = makeAudio(t);
   await addBackground(audio);
   await audio.play({ notes: score, bpm: 120, fromBeat: 2, backgroundOffset: -1 });
-  const source = audio._context.nodes.find(node => node.kind === 'buffer');
+  const source = audio._context.nodes.find(node => node.kind === 'background');
   close(source.offset, 2);
   assert.equal(audio._context.nodes.filter(node => node.kind === 'oscillator').length, 0);
   audio._context.currentTime = 0.4;
@@ -174,7 +203,7 @@ test('independent note and backing offsets schedule on the same clock and resume
   await addBackground(audio);
   await audio.play({ notes: score, bpm: 120, noteOffset: 2, backgroundOffset: 1, includeLeadIn: true });
   const context = audio._context;
-  const background = [...audio._voices].find(voice => voice.type === 'background');
+  const background = { source: audio._backgroundPlayer.current };
   close(background.source.startTime, 1.035);
   assert.equal([...audio._voices].some(voice => voice.type === 'note'), false);
   context.currentTime = 1.9;
@@ -186,7 +215,7 @@ test('independent note and backing offsets schedule on the same clock and resume
   close(audio.pause(), 5);
   await audio.play({ notes: score, bpm: 120, noteOffset: 2, backgroundOffset: 1, fromBeat: 5 });
   const resumedNote = [...audio._voices].find(voice => voice.type === 'note');
-  const resumedBackground = [...audio._voices].find(voice => voice.type === 'background');
+  const resumedBackground = { source: audio._backgroundPlayer.current };
   close(resumedNote.source.startTime, 2.57);
   close(resumedNote.source.stops[0], 3.075);
   close(resumedBackground.source.offset, 1.5);
@@ -203,7 +232,7 @@ test('negative note prefixes are skipped while the metronome uses its own positi
   close(note.source.startTime, 0.035);
   close(note.source.frequency.events[0].value, 440 * 2 ** ((62 - 69) / 12));
   assert.equal([...audio._voices].some(voice => voice.type === 'click'), false);
-  close([...audio._voices].find(voice => voice.type === 'background').source.startTime, 1.035);
+  close(audio._backgroundPlayer.current.startTime, 1.035);
   context.currentTime = 0.4;
   audio._tick();
   const clicks = [...audio._voices].filter(voice => voice.type === 'click');
@@ -219,10 +248,10 @@ test('seeking into the backing tail keeps the independent metronome without repl
   await audio.play({ notes: score, bpm: 120, noteOffset: 1, backgroundOffset: -2, fromBeat: 15 });
   close(audio.getPosition(), 15);
   const voices = [...audio._voices];
-  assert.equal(voices.length, 2);
-  assert.equal(voices[0].type, 'background');
-  close(voices[0].source.offset, 9.5);
-  close(voices[0].source.stops[0], 50.535);
+  assert.equal(voices.length, 1);
+  assert.equal(voices[0].type, 'click');
+  close(audio._backgroundPlayer.current.offset, 9.5);
+  close(audio._backgroundPlayer.current.stops[0], 50.535);
   audio._context.currentTime = 0.5;
   audio._tick();
   assert.equal([...audio._voices].some(voice => voice.type === 'note'), false);
@@ -238,11 +267,11 @@ test('a backing-only timeline supports metronome playback without waiting for a 
   audio.setMetronome(true);
   await audio.play({ notes: [], bpm: 120, backgroundOffset: -2, includeLeadIn: true });
   const voices = [...audio._voices];
-  assert.equal(voices.length, 2);
-  assert.equal(voices[0].type, 'background');
+  assert.equal(voices.length, 1);
+  assert.equal(voices[0].type, 'click');
   close(audio.getPosition(), 0);
-  close(voices[0].source.offset, 2);
-  close(voices[0].source.stops[0], 58.035);
+  close(audio._backgroundPlayer.current.offset, 2);
+  close(audio._backgroundPlayer.current.stops[0], 58.035);
   audio._context.currentTime = 58.1;
   audio._tick();
   assert.equal(audio.isPlaying, true);
@@ -283,7 +312,7 @@ test('a shorter backing clip does not trim a later note clip and timeline inspec
   assert.equal(loaded.startSeconds, 0);
   assert.equal(loaded.endSeconds, 7);
   await audio.play({ notes: score, bpm: 120, noteOffset: 3, backgroundOffset: -59 });
-  const background = [...audio._voices].find(voice => voice.type === 'background');
+  const background = { source: audio._backgroundPlayer.current };
   close(background.source.offset, 59);
   close(background.source.stops[0], 1.035);
   audio._context.currentTime = 2;
@@ -666,7 +695,7 @@ test('enabling the metronome during sampled playback schedules the next beat and
   await audio.play({ notes: score, bpm: 120 });
   const context = audio._context;
   const note = [...audio._voices].find(voice => voice.type === 'note');
-  const background = [...audio._voices].find(voice => voice.type === 'background');
+  const background = { source: audio._backgroundPlayer.current };
   const noteStops = [...note.source.stops];
   const backgroundStops = [...background.source.stops];
   const startTime = audio._startTime;
@@ -815,4 +844,246 @@ test('a failed older sound request does not surface an error after a newer choic
   assert.equal(audio.instrument, 'synth');
   await audio.startManualNote(60);
   assert.equal(audio._manualVoice.source.kind, 'oscillator');
+});
+
+test('playback speed scales the score clock and note lengths without changing pitch or source timeline', async t => {
+  for (const playbackRate of [0.5, 2]) {
+    await t.test(`${playbackRate}x`, async subtest => {
+      const audio = makeAudio(subtest);
+      const timeline = audio.getTimeline({ notes: score, bpm: 120 });
+      await audio.play({ notes: score, bpm: 120, playbackRate });
+      const note = [...audio._voices].find(voice => voice.type === 'note');
+      close(note.source.frequency.events[0].value, 440 * 2 ** (-9 / 12));
+      close(note.source.stops[0] - note.source.startTime, 1 / playbackRate + 0.005);
+      close(audio._endTime - audio._startTime, timeline.endSeconds / playbackRate);
+      assert.deepEqual(audio.getTimeline({ notes: score, bpm: 120 }), timeline);
+      audio._context.currentTime = audio._startTime + 0.5;
+      close(audio.getPosition(), playbackRate);
+      close(audio.pause(), playbackRate);
+      await audio.startManualNote(69);
+      close(audio._manualVoice.source.frequency.events[0].value, 440);
+      assert.equal(audio._manualVoice.source.stops.length, 0);
+    });
+  }
+});
+
+test('changing speed on resume keeps the same source beat, held note pitch, and backing position', async t => {
+  mockSamples(t);
+  const audio = makeAudio(t);
+  await audio.setInstrument('fluid');
+  await addBackground(audio);
+  await audio.play({ notes: score, bpm: 120, playbackRate: 0.5, backgroundOffset: -2 });
+  const firstNote = [...audio._voices].find(voice => voice.type === 'note');
+  const firstBacking = audio._backgroundPlayer.current;
+  close(firstNote.source.playbackRate.events[0].value, 1);
+  close(firstNote.source.stops[0], 2.04);
+  audio._context.currentTime = 1.035;
+  close(audio.pause(), 1);
+  assert.equal(firstNote.source.disconnected, true);
+  assert.equal(firstBacking.disconnected, true);
+
+  await audio.play({ notes: score, bpm: 120, fromBeat: 1, playbackRate: 2, backgroundOffset: -2 });
+  const resumedNote = [...audio._voices].find(voice => voice.type === 'note');
+  const resumedBacking = audio._backgroundPlayer.current;
+  close(resumedNote.source.playbackRate.events[0].value, 1);
+  close(resumedNote.source.stops[0] - resumedNote.source.startTime, 0.255);
+  close(resumedBacking.offset, 2.5);
+  close(resumedBacking.playbackRate.events[0].value, 2);
+  close(audio.getPosition(), 1);
+  audio._context.currentTime = audio._startTime + 0.25;
+  close(audio.getPosition(), 2);
+});
+
+test('speed scales independent delays and metronome spacing on the shared source timeline', async t => {
+  for (const playbackRate of [0.5, 2]) {
+    await t.test(`${playbackRate}x`, async subtest => {
+      const audio = makeAudio(subtest);
+      await addBackground(audio);
+      await audio.play({ notes: score, bpm: 120, noteOffset: 2, backgroundOffset: 1,
+        metronome: true, metronomeOffset: 1, playbackRate });
+      const backing = audio._backgroundPlayer.current;
+      close(backing.startTime, audio._startTime + 1 / playbackRate);
+      close(backing.offset, 0);
+      close(backing.playbackRate.events[0].value, playbackRate);
+      close(backing.stops[0], audio._startTime + 61 / playbackRate);
+      assert.equal([...audio._voices].some(voice => voice.type === 'note'), false);
+      audio._context.currentTime = audio._startTime + 1 / playbackRate - 0.1;
+      audio._tick();
+      const firstClick = [...audio._voices].find(voice => voice.type === 'click');
+      close(firstClick.source.startTime, backing.startTime);
+      audio._context.currentTime = audio._startTime + 1.5 / playbackRate - 0.1;
+      audio._tick();
+      const clicks = [...audio._voices].filter(voice => voice.type === 'click');
+      close(clicks[1].source.startTime - firstClick.source.startTime, 0.5 / playbackRate);
+      audio._context.currentTime = audio._startTime + 2 / playbackRate - 0.1;
+      audio._tick();
+      const note = [...audio._voices].find(voice => voice.type === 'note');
+      close(note.source.startTime, audio._startTime + 2 / playbackRate);
+    });
+  }
+});
+
+test('seeking into a negative-offset backing tail skips source seconds and ends at the chosen speed', async t => {
+  for (const playbackRate of [0.5, 2]) {
+    await t.test(`${playbackRate}x`, async subtest => {
+      let ended = 0;
+      const audio = makeAudio(subtest, { onEnded: () => { ended += 1; } });
+      await addBackground(audio);
+      await audio.play({ notes: score, bpm: 120, fromBeat: 15, backgroundOffset: -2, playbackRate });
+      const backing = audio._backgroundPlayer.current;
+      close(backing.offset, 9.5);
+      close(backing.stops[0] - backing.startTime, 50.5 / playbackRate);
+      assert.equal(audio._voices.size, 0);
+      audio._context.currentTime = audio._startTime + 50.5 / playbackRate - 0.001;
+      audio._tick();
+      assert.equal(audio.isPlaying, true);
+      audio._context.currentTime += 0.002;
+      audio._tick();
+      audio._tick();
+      assert.equal(audio.isPlaying, false);
+      close(audio.getPosition(), 116);
+      assert.equal(ended, 1);
+    });
+  }
+});
+
+test('backing-only playback can change speed and keeps the later independent metronome tail', async t => {
+  const audio = makeAudio(t);
+  await addBackground(audio);
+  audio._instrumentReady = new Promise(() => {});
+  await audio.play({ notes: [], bpm: 120, backgroundOffset: -2, metronome: true,
+    metronomeOffset: 1, playbackRate: 2 });
+  close(audio._backgroundPlayer.current.offset, 2);
+  close(audio._backgroundPlayer.current.stops[0], 29.035);
+  close(audio._endTime, 30.535);
+  audio._context.currentTime = 29.1;
+  audio._tick();
+  assert.equal(audio.isPlaying, true);
+  assert.equal([...audio._voices].some(voice => voice.type === 'note'), false);
+  audio._context.currentTime = 30.6;
+  audio._tick();
+  assert.equal(audio.isPlaying, false);
+  close(audio.getPosition(), 122);
+});
+
+test('negative note and click prefixes stay skipped when changing speed', async t => {
+  const audio = makeAudio(t);
+  await audio.play({ notes: score, bpm: 120, noteOffset: -0.5, metronome: true,
+    metronomeOffset: -0.25, playbackRate: 2 });
+  const note = [...audio._voices].find(voice => voice.type === 'note');
+  const click = [...audio._voices].find(voice => voice.type === 'click');
+  close(note.source.startTime, 0.035);
+  close(note.source.stops[0], 0.29);
+  close(click.source.startTime, 0.16);
+  close(click.source.frequency.events[0].value, 1500);
+});
+
+test('a new speed cancels delayed backing starts and ignores an older rejected start', async t => {
+  const errors = [];
+  const audio = makeAudio(t, { onError: error => errors.push(error) });
+  await addBackground(audio);
+  const helper = audio._backgroundPlayer;
+  const starts = [];
+  helper.play = function (options) {
+    FakeBackgroundPlayer.prototype.play.call(this, options);
+    return new Promise((resolve, reject) => starts.push({ resolve, reject }));
+  };
+  await audio.play({ notes: score, bpm: 120, backgroundOffset: 10, playbackRate: 0.5 });
+  const firstBacking = helper.current;
+  close(firstBacking.startTime, 20.035);
+  audio.pause();
+  assert.equal(firstBacking.disconnected, true);
+  assert.equal(firstBacking.stops.at(-1), 0);
+  await audio.play({ notes: score, bpm: 120, backgroundOffset: 10, playbackRate: 2 });
+  close(helper.current.startTime, 5.035);
+  starts[0].reject(new Error('old request'));
+  await Promise.resolve();
+  assert.equal(audio.isPlaying, true);
+  assert.equal(errors.length, 0);
+  starts[1].reject(new Error('current request'));
+  await Promise.resolve();
+  assert.equal(audio.isPlaying, false);
+  assert.equal(helper.current, null);
+  assert.equal(errors.length, 1);
+  assert.equal(errors[0].message, 'current request');
+});
+
+test('backing unlock begins before awaiting the context and cannot revive stopped playback', async t => {
+  const audio = makeAudio(t);
+  await addBackground(audio);
+  const helper = audio._backgroundPlayer;
+  let releaseUnlock;
+  let resumeContext;
+  helper.unlock = () => new Promise(resolve => { releaseUnlock = resolve; });
+  audio._context.resume = () => new Promise(resolve => { resumeContext = resolve; });
+  const pending = audio.play({ notes: score, bpm: 120, playbackRate: 0.5 });
+  assert.equal(typeof releaseUnlock, 'function');
+  assert.equal(typeof resumeContext, 'function');
+  audio.stop();
+  releaseUnlock(true);
+  resumeContext();
+  await pending;
+  assert.equal(audio.isPlaying, false);
+  assert.equal(helper.current, null);
+  assert.equal(audio._context.nodes.length, 0);
+});
+
+test('invalid speeds stop the old run and omitted speed returns to normal playback', async t => {
+  const audio = makeAudio(t);
+  await audio.play({ notes: score, bpm: 120, playbackRate: 0.5 });
+  const original = [...audio._voices][0];
+  for (const playbackRate of [0.24, 2.01, NaN, Infinity]) {
+    await assert.rejects(audio.play({ notes: score, bpm: 120, playbackRate }), /Playback speed/);
+    assert.equal(audio.isPlaying, false);
+  }
+  assert.equal(original.source.disconnected, true);
+  await audio.play({ notes: score, bpm: 120 });
+  assert.equal(audio.playbackRate, 1);
+  close(audio._endTime, 4.035);
+});
+
+test('only the newest speed request schedules playback when audio resumes out of order', async t => {
+  const audio = makeAudio(t);
+  const context = audio._ensureContext();
+  const resumes = [];
+  context.resume = () => new Promise(resolve => { resumes.push(resolve); });
+  const slow = audio.play({ notes: score, bpm: 120, playbackRate: 0.5 });
+  const fast = audio.play({ notes: score, bpm: 120, playbackRate: 2, fromBeat: 1 });
+  resumes[1]();
+  await fast;
+  resumes[0]();
+  await slow;
+  assert.equal(context.nodes.length, 1);
+  assert.equal(audio.playbackRate, 2);
+  close(audio.getPosition(), 1);
+  close(context.nodes[0].stops[0], 0.29);
+});
+
+test('a failed native backing load clears its waveform and track metadata', async t => {
+  const audio = makeAudio(t);
+  await addBackground(audio);
+  audio._backgroundPlayer.setFile = async () => { throw new Error('media load failed'); };
+  await assert.rejects(addBackground(audio), /media load failed/);
+  assert.equal(audio.background, null);
+  assert.equal(audio.getBackgroundBuffer(), null);
+  assert.equal(audio.getTimeline({ notes: score, bpm: 120 }).endSeconds, 4);
+});
+
+test('a superseded native load cannot leave a stale waveform when the newer file fails decoding', async t => {
+  const audio = makeAudio(t);
+  await addBackground(audio);
+  let finishMedia;
+  let mediaStarted;
+  const waiting = new Promise(resolve => { mediaStarted = resolve; });
+  audio._backgroundPlayer.setFile = () => new Promise(resolve => {
+    finishMedia = resolve;
+    mediaStarted();
+  });
+  const olderLoad = audio.setBackground({ name: 'replacement.wav', arrayBuffer: async () => new ArrayBuffer(8) });
+  await waiting;
+  await assert.rejects(audio.setBackground({ arrayBuffer: async () => { throw new Error('bad file'); } }), /bad file/);
+  finishMedia(true);
+  assert.equal(await olderLoad, null);
+  assert.equal(audio.background, null);
+  assert.equal(audio.getBackgroundBuffer(), null);
 });
