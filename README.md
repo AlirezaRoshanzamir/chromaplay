@@ -4,7 +4,7 @@ A browser app for practicing a 12-hole chromatic harmonica. Write a melody in si
 
 **[Open ChromaPlay](https://alirezaroshanzamir.github.io/chromaplay/)**
 
-![ChromaPlay showing the falling-note visualizer, 12 playable harmonica holes, and playback controls](docs/screenshots/practice.jpg)
+![ChromaPlay showing the falling-note visualizer and 12 playable harmonica holes](docs/screenshots/practice.jpg)
 
 Follow the falling notes or play the harmonica directly with your mouse and keyboard.
 
@@ -16,8 +16,8 @@ Follow the falling notes or play the harmonica directly with your mouse and keyb
 - Tempo and time signature controls in the score panel, synced with text headers, plus a metronome, looping, seeking, and note-by-note navigation.
 - Three sounds: synthesized reed, FluidR3 harmonica, and recorded VCSL chromatic harmonica.
 - A playable harmonica with mouse, touch, and keyboard controls.
-- Local backing tracks with separate volume and positive or negative start offsets.
-- Separate Track and Notes volume sliders in the player, available during playback.
+- Notes and backing track waveforms on one timeline, with separate volume and start delay controls.
+- Local backing tracks that can play alongside a score or on their own.
 - Plain-text copying, score import/export, and browser autosave.
 
 ChromaPlay is a static HTML, CSS, and JavaScript app. It has no application backend, account system, or third-party JavaScript dependencies.
@@ -177,7 +177,9 @@ The time signature defaults to **4/4**. It accepts a numerator of **1-32** and a
 
 Tempo and meter are part of the score. Changing either with its control or header pauses playback and returns to the beginning. Removing a header restores that setting's default in the controls. Older saved projects keep their timing: ChromaPlay adds their existing tempo and time signature as score headers when first opening them.
 
-Use **Previous** and **Next** to move through notes and rests, **Restart** to return to the beginning, or the progress bar to seek. **Pause** stops both notes and backing audio. **Loop** repeats the score. Both audio parts stop at the end of the score.
+Use **Previous** and **Next** to move through notes and rests, **Restart** to return to the beginning, or the timeline to seek. **Pause** pauses both notes and backing audio. Playback continues until the shifted score and backing track have both finished, and **Loop** repeats that full timeline. A backing track can play on its own when the score is empty.
+
+The falling-note visualizer follows the score's position within the shared timeline. It continues through any time before the notes begin or after they finish while the backing track plays. The metronome starts with the delayed score and stops when the score ends, even if the backing track continues.
 
 Right Arrow moves to the next note and Home restarts when focus is outside the editor, inputs, buttons, and other controls, and the guide is closed. Space is the draw modifier, not a playback shortcut.
 
@@ -187,38 +189,43 @@ Drag the horizontal handle at the bottom of the visualization card up or down to
 
 Short notes keep their hole and slider labels, using a smaller font when needed. The visible time window adjusts with the visualizer height to keep those notes readable.
 
-### Adjusting volume during playback
+### Waveforms, volume, and start delays
 
-The **Track** and **Notes** sliders below the progress bar set each part's volume from **0% to 100%**. Set either one to **0%** to mute it, or both to **0%** for silent visual practice. Raising the slider restores its sound. You can adjust either volume during playback without moving the playhead.
+![Notes and backing track waveforms with separate volumes and start delays](docs/screenshots/audio-timeline.png)
+
+The player shows a **Notes** waveform and, when you load a backing file, a **Track** waveform. Both use the same time scale and playhead. The track waveform comes from the uploaded audio; the notes waveform previews the amplitude of the written melody with the selected harmonica sound.
+
+Each row has a volume slider with a percentage and its own **Start delay** in seconds. Volumes range from **0% to 100%**. Set either one to **0%** to mute it, or both to **0%** for silent visual practice. Raising the slider restores its sound. You can adjust either volume during playback without moving the playhead.
 
 The Notes slider also controls the metronome and manually played holes. Volumes autosave with the score and are included in exported projects. A muted part in an older saved score opens at 0%, so its state is visible and you can restore it with the slider.
+
+Start delays range from **-600 to 600 seconds**, including fractions, and both default to **0**. They are measured from the same timeline zero, rather than from each other:
+
+| Notes delay | Track delay | Result |
+| --- | --- | --- |
+| `0` | `0` | Notes and track start together |
+| `0` | `-2` | Track starts two seconds before the notes |
+| `3` | `0` | Notes start three seconds after the track |
+| `-2` | `1` | Notes start three seconds before the track |
+
+Negative delays extend the timeline before zero, so **Play** from the beginning and **Restart** include that lead-in. Pause, resume, and seeking keep both waveforms aligned. The full timeline extends to whichever part finishes last. Both delays autosave and are included in exported projects; older projects start the notes at zero and keep their existing track delay.
 
 ## Backing tracks
 
 Choose a local audio file or drop it on the upload area. Supported formats depend on your browser; MP3 and WAV are good starting points. Files can be up to **100 MB**.
 
-Track and note volumes are separate. Adjust them with the sliders in the player panel. The audio file plays at its original speed; changing the score tempo does not stretch the track.
+Loading a file adds its waveform and Track controls to the player. Adjust its volume and start delay there to match the score. The audio file plays at its original speed; changing the score tempo does not stretch the track.
 
-![Backing track controls for choosing an audio file and setting its start offset](docs/screenshots/backing-track.jpg)
+![Backing track controls for choosing or removing a local audio file](docs/screenshots/backing-track.jpg)
 
 Choose a track from your device and adjust its timing to match the score.
-
-Track offset is measured in seconds relative to the first note, from **-600 to 600**:
-
-| Offset | Result |
-| --- | --- |
-| `0` | Track and first note start together |
-| `-2` | Track starts two seconds before the first note |
-| `2` | Track starts two seconds after the first note |
-
-A negative offset provides a lead-in when playing from the beginning or restarting. Pause and resume preserve progress through the lead-in. Seeking or resuming aligns the backing track with the score timeline.
 
 ## Saving and privacy
 
 The current score and settings autosave to this browser's local storage, including unfinished notation. Storage belongs to the browser and site address. Clearing browser data removes it, and scores saved at another ChromaPlay address do not appear here automatically. Use export/import to move them.
 
-- **Export score** downloads a `.chroma.json` file with the title, notation and its tempo/meter headers, sound choice, track offset, volumes, metronome, and loop settings.
-- **Import** accepts `.json` and `.chroma` projects, or `.txt` notation. Text imports keep tempo/meter headers, use defaults for omitted settings, and use the filename as the title. Version 1 projects are migrated to the current format automatically.
+- **Export score** downloads a version 3 `.chroma.json` file with the title, notation and its tempo/meter headers, sound choice, both start delays, volumes, metronome, and loop settings.
+- **Import** accepts `.json` and `.chroma` projects, or `.txt` notation. Text imports keep tempo/meter headers, use defaults for omitted settings, and use the filename as the title. Version 1 and 2 projects are migrated to the current format automatically, preserving their notes, selected sound, volumes, and existing track delay.
 - Imports validate notation and settings before replacing the score. Score files are limited to **1 MB**, and notation to **100,000 characters**.
 
 Backing audio stays in the current tab. It is not saved in local storage or included in an exported score. Select the file again after reloading the app or opening a score in another tab.
@@ -245,6 +252,8 @@ npm run build
 | `tools/prepare-samples.py` | Optional script for rebuilding the bundled recordings |
 | `manual-play.js` | Mouse, touch, and keyboard instrument controls |
 | `visualizer.js` | Falling-note canvas display |
+| `timeline.js` | Shared playback bounds and independent clip delays |
+| `waveform.js` | Cached audio previews, ruler, playhead, and waveform seeking |
 | `project.js` | Project validation, import, and export |
 | `index.html`, `styles.css` | Page structure and styling |
 | `*.test.js` | Automated tests |

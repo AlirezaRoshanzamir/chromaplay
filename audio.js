@@ -1,4 +1,5 @@
 import { isInstrument, loadInstrument, nearestSample } from './instrument.js';
+import { createTimeline } from './timeline.js';
 
 const LOOKAHEAD_SECONDS = 0.2;
 const SCHEDULER_INTERVAL_MS = 25;
@@ -43,7 +44,17 @@ export class PracticeAudio {
     this._instrumentData = null;
     this._instrumentError = false;
     this._instrumentReady = Promise.resolve(null);
+    this._timeline = createTimeline();
   }
+
+  getTimeline(options = {}) {
+    return createTimeline({ ...options, backgroundDuration: this._backgroundBuffer?.duration || 0 });
+  }
+
+  /** Decoded audio is shared for waveform inspection; callers must not modify it. */
+  getBackgroundBuffer() { return this._backgroundBuffer || null; }
+
+  getInstrumentData() { return this._instrumentData; }
 
   /** Select a sound. A superseded request returns false and cannot replace the current sound. */
   async setInstrument(id) {
@@ -108,34 +119,35 @@ export class PracticeAudio {
     return context;
   }
 
-  async play({ notes, bpm, fromBeat = 0, backgroundOffset = 0, includeLeadIn = false }) {
+  async play({ notes = [], bpm, fromBeat = 0, noteOffset = 0, backgroundOffset = 0, includeLeadIn = false }) {
     this._cancelPlayback();
     const generation = this._generation;
     this._notes = [...(notes || [])].sort((a, b) => a.startBeat - b.startBeat);
-    this._totalBeats = this._notes.reduce((end, note) => Math.max(end, Number(note.endBeat) || 0), 0);
     this._bpm = Number(bpm);
     if (!Number.isFinite(this._bpm) || this._bpm <= 0) {
       this._notifyState();
       throw new Error('Tempo must be greater than zero.');
     }
-    this._backgroundOffset = Number.isFinite(Number(backgroundOffset)) ? Number(backgroundOffset) : 0;
-    const earliestBeat = this._backgroundBuffer ? Math.min(0, this._backgroundOffset * this._bpm / 60) : 0;
+    this._timeline = this.getTimeline({ notes: this._notes, bpm: this._bpm, noteOffset, backgroundOffset });
+    this._totalBeats = this._timeline.endBeat;
+    this._backgroundOffset = this._timeline.backgroundStartSeconds;
     const requestedBeat = Number.isFinite(Number(fromBeat)) ? Number(fromBeat) : 0;
-    this._position = Math.min(this._totalBeats, Math.max(earliestBeat, requestedBeat));
-    if (includeLeadIn && requestedBeat === 0) this._position = earliestBeat;
-    if (this._totalBeats <= 0 || this._position >= this._totalBeats) {
+    this._position = Math.min(this._totalBeats, Math.max(this._timeline.startBeat, requestedBeat));
+    if (includeLeadIn && requestedBeat === 0) this._position = this._timeline.startBeat;
+    if (this._timeline.durationBeats <= 0 || this._position >= this._totalBeats) {
       this._notifyState();
       return;
     }
 
     const context = this._ensureContext();
-    await Promise.all([context.resume(), this.prepareInstrument()]);
+    await Promise.all([context.resume(), this._timeline.hasNotes ? this.prepareInstrument() : Promise.resolve()]);
     // A pause, stop, or newer play request may arrive while the browser resumes audio.
     if (generation !== this._generation) return;
     this._startBeat = this._position;
     this._startTime = context.currentTime + START_DELAY_SECONDS;
     this._endTime = this._timeAtBeat(this._totalBeats);
-    this._nextNoteIndex = this._notes.findIndex(note => note.endBeat > this._startBeat);
+    this._noteEndTime = this._timeAtBeat(this._timeline.noteEndBeat);
+    this._nextNoteIndex = this._notes.findIndex(note => note.endBeat + this._timeline.noteStartBeat > this._startBeat);
     if (this._nextNoteIndex < 0) this._nextNoteIndex = this._notes.length;
     this._resetClickCursor(this._startBeat);
     this.isPlaying = true;
@@ -161,7 +173,7 @@ export class PracticeAudio {
 
   stop() {
     this._cancelPlayback();
-    this._position = 0;
+    this._position = this._timeline.startBeat;
     this._notifyState();
   }
 
@@ -276,7 +288,8 @@ export class PracticeAudio {
 
   _resetClickCursor(position) {
     const pulse = 4 / this.denominator;
-    this._nextClickBeat = Math.ceil(Math.max(0, position) / pulse - 1e-9) * pulse;
+    const scorePosition = position - this._timeline.noteStartBeat;
+    this._nextClickBeat = Math.ceil(Math.max(0, scorePosition) / pulse - 1e-9) * pulse;
   }
 
   _tick() {
@@ -292,18 +305,18 @@ export class PracticeAudio {
     const horizon = now + LOOKAHEAD_SECONDS;
     while (this._nextNoteIndex < this._notes.length) {
       const note = this._notes[this._nextNoteIndex];
-      const start = this._timeAtBeat(Math.max(note.startBeat, this._startBeat));
+      const start = this._timeAtBeat(Math.max(note.startBeat + this._timeline.noteStartBeat, this._startBeat));
       if (start > horizon) break;
       this._nextNoteIndex += 1;
-      const end = this._timeAtBeat(note.endBeat);
+      const end = this._timeAtBeat(note.endBeat + this._timeline.noteStartBeat);
       if (!note.isRest && Number.isFinite(note.midi) && end > now + 0.004) {
         this._scheduleNote(note.midi, Math.max(start, now + 0.003), end);
       }
     }
-    if (!this.metronomeEnabled) return;
+    if (!this.metronomeEnabled || !this._timeline.hasNotes) return;
     const pulse = 4 / this.denominator;
-    while (this._nextClickBeat < this._totalBeats && this._timeAtBeat(this._nextClickBeat) <= horizon) {
-      const clickTime = this._timeAtBeat(this._nextClickBeat);
+    while (this._nextClickBeat < this._timeline.scoreBeats && this._timeAtBeat(this._timeline.noteStartBeat + this._nextClickBeat) <= horizon) {
+      const clickTime = this._timeAtBeat(this._timeline.noteStartBeat + this._nextClickBeat);
       const pulseIndex = Math.round(this._nextClickBeat / pulse);
       // If the browser throttles timers, skip missed clicks instead of bunching them together.
       if (clickTime >= now - 0.01) this._scheduleClick(Math.max(clickTime, now + 0.002), pulseIndex % this.numerator === 0);
@@ -374,7 +387,7 @@ export class PracticeAudio {
     gain.connect(this._clickGain);
     this._trackVoice(source, gain, 'click');
     source.start(start);
-    source.stop(Math.min(start + 0.07, this._endTime));
+    source.stop(Math.min(start + 0.07, this._noteEndTime));
   }
 
   _scheduleBackground() {
@@ -390,7 +403,7 @@ export class PracticeAudio {
     source.connect(this._backgroundGain);
     this._trackVoice(source, null, 'background');
     source.start(start, bufferOffset);
-    source.stop(this._endTime);
+    source.stop(Math.min(this._endTime, desiredStart + this._backgroundBuffer.duration));
   }
 
   _cancelVoices(type) {
