@@ -13,7 +13,7 @@
 <body>
   <header class="site-header">
     <a class="brand" href="./" aria-label="ChromaPlay home"><img src="./favicon.svg" alt="" width="36" height="36"><span>chroma<span class="brand-light">play</span><span class="brand-dot">.</span></span></a>
-    <div class="header-right"><span class="local-badge"><span class="status-dot"></span> A space just for you</span><button class="text-button" id="guide-button"><span data-icon="book"></span> Notation guide</button></div>
+    <div class="header-right"><span class="local-badge"><span class="status-dot"></span> A space just for you</span><button class="text-button" id="guide-button"><span data-icon="book"></span> Notation guide</button><a class="github-link" href="https://github.com/AlirezaRoshanzamir/chromaplay" target="_blank" rel="noopener noreferrer" aria-label="Star ChromaPlay on GitHub (opens in a new tab)" title="Star ChromaPlay on GitHub"><span data-icon="github"></span><span class="github-label">Star on GitHub</span></a></div>
   </header>
   <main>
     <section class="page-heading"><div><div class="eyebrow">LESS SCROLLING. MORE PLAYING.</div><h1>Your practice studio<span>.</span></h1><p>A few notes, a steady rhythm, and a little progress.</p></div><div class="file-actions"><button class="button secondary" id="import-button"><span data-icon="upload"></span> Import</button><button class="button secondary" id="export-button"><span data-icon="download"></span> Export score</button></div></section>
@@ -76,7 +76,10 @@
         <p class="privacy-note"><span data-icon="lock"></span> Your music stays in your browser. Always.</p>
       </aside>
     </div>
-    <footer><span>Small steps. Good music.</span><span>Made for 12-hole chromatic harmonica <i></i> C solo tuning</span></footer>
+    <footer class="site-footer">
+      <div class="footer-note"><strong>Small steps. Good music.</strong><span>Made for 12-hole chromatic harmonica <i></i> C solo tuning</span></div>
+      <div class="creator"><p>Created by <a href="https://linkedin.com/in/alireza-roshanzamir" target="_blank" rel="noopener noreferrer">Alireza Roshanzamir</a></p><nav class="creator-links" aria-label="Contact the creator"><a href="https://linkedin.com/in/alireza-roshanzamir" target="_blank" rel="noopener noreferrer">LinkedIn</a><a href="https://t.me/recurisve_recursion" target="_blank" rel="noopener noreferrer">Telegram</a><a href="mailto:a.roshanzamir1996@gmail.com" title="a.roshanzamir1996@gmail.com">Email</a></nav></div>
+    </footer>
   </main>
   <input type="file" id="import-file" accept=".json,.txt,.chroma,application/json,text/plain" hidden>
   <input type="file" id="background-file" accept="audio/*,.mp3,.wav,.m4a,.ogg,.flac" hidden>
