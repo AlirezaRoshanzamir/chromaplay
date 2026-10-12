@@ -3,7 +3,8 @@
 These images show the main parts of ChromaPlay:
 
 - `practice.jpg`: the visualizer, its resize handle, and playable harmonica.
-- `score-editor.jpg`: the inline note editor, editable tempo and time signature boxes, initial timing controls, note colors, and line breaks.
+- `score-editor.jpg`: the DSL tab, editable tempo and time signature boxes, initial timing controls, note colors, and main-format selector.
+- `musicxml-editor.jpg`: the generated MusicXML tab, copy/download controls, and harmonica annotation guide.
 - `backing-track.jpg`: the short upload row below Notes, including a local file and its remove control.
 - `audio-timeline.png`: matching Notes, Track, and Metronome waveform rows, independent volume and start delays, the metronome toggle, zoom, and a shared playhead.
 
