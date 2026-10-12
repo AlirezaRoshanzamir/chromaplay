@@ -10,6 +10,7 @@ import { DEFAULT_PROJECT, validateProject, parseProjectFile, serializeProject } 
 import { deriveScoreFormats, switchScoreFormat } from './score-formats.js';
 import { SheetMusic } from './sheet-music.js';
 import { WorkspaceLayout } from './workspace-layout.js';
+import { SheetImport } from './sheet-import.js';
 
 const $ = (id) => document.getElementById(id);
 const icons = {
@@ -90,7 +91,7 @@ manual = new ManualHarmonica($('harmonica'), {
   onStart: () => { if (audio.isPlaying || pendingPlay) pausePlayback(false); else playRequest++; },
   onChange: () => { activeIndex = -2; renderPosition(); updateTransport(); },
   onError: error => notify(error.message || 'Audio could not start in this browser.', true),
-  isBlocked: () => $('guide-dialog').open || $('format-dialog').open,
+  isBlocked: () => Boolean(document.querySelector('dialog[open]')),
 });
 const alignHoles = () => {
   const canvasRect = $('visualizer').getBoundingClientRect();
@@ -594,6 +595,18 @@ $('examples').addEventListener('change', () => {
   applyProject(); save(); $('examples').value = '';
 });
 $('import-button').addEventListener('click', () => $('import-file').click());
+new SheetImport({
+  dialog: $('sheet-import-dialog'),
+  openButton: $('scan-sheet-button'),
+  onOpen: () => { noteEditor.commit(); pausePlayback(); },
+  onUse: imported => {
+    stopForEdit();
+    project = { ...imported };
+    applyProject();
+    save();
+    notify('Recognized score imported. Review the sheet and conversion notes before playing.');
+  },
+});
 async function copyScoreText(source, button, label) {
   if (!source) return;
   try {
@@ -686,7 +699,7 @@ const guide = $('guide-dialog');
 $('close-guide').addEventListener('click', () => guide.close());
 guide.addEventListener('click', event => { const rect = guide.getBoundingClientRect(); if (event.target === guide && (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom)) guide.close(); });
 document.addEventListener('keydown', event => {
-  if (event.defaultPrevented || guide.open || $('format-dialog').open || event.altKey || event.ctrlKey || event.metaKey || event.target.closest('input,textarea,select,button,[role=textbox],[role=slider],[role=separator]')) return;
+  if (event.defaultPrevented || document.querySelector('dialog[open]') || event.altKey || event.ctrlKey || event.metaKey || event.target.closest('input,textarea,select,button,[role=textbox],[role=slider],[role=separator]')) return;
   if (event.code === 'ArrowRight') { event.preventDefault(); stepNote(1); }
   if (event.code === 'Home') { event.preventDefault(); void seekTo(timeline.startBeat); }
 });

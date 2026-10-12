@@ -13,6 +13,7 @@ Follow the falling notes or play the harmonica directly with your mouse and keyb
 - A simple notation language for holes, blow/draw, the slider, note lengths, and rests.
 - An inline score editor with duration-sized note boxes, breath colors, and a moving playhead.
 - DSL and MusicXML tabs, with one editable main format and an automatically converted view of the other.
+- Optional sheet image and PDF recognition through the public LEGATO demo, with MusicXML download and import.
 - Live sheet music with a moving playhead, zoom, and automatic scrolling during playback.
 - A falling-note visualizer across all 12 holes, with adjustable height and labels for short notes.
 - Tempo and time signature changes anywhere in the score, with editable timing boxes and controls for the initial settings, plus a metronome, looping, seeking, and note-by-note navigation.
@@ -25,7 +26,7 @@ Follow the falling notes or play the harmonica directly with your mouse and keyb
 - Hide/Show controls for each main panel and a compact player fixed at the bottom of the screen.
 - One or two columns, centered or full-width panels, adjustable row heights, and a draggable column divider.
 
-ChromaPlay is a static HTML, CSS, and JavaScript app with no application backend or account system. Sheet music uses a locally bundled copy of OpenSheetMusicDisplay. Score conversion, rendering, and playback run in your browser.
+ChromaPlay is a static HTML, CSS, and JavaScript app with no ChromaPlay backend or account system. Sheet music uses a locally bundled copy of OpenSheetMusicDisplay. DSL/MusicXML conversion, rendering, and playback run in your browser. The optional **Scan sheet** feature sends a selected image or PDF to the public LEGATO demo for recognition.
 
 ## Getting started
 
@@ -148,6 +149,18 @@ Changing tabs only changes the view. Changing the main format asks for confirmat
 
 Each tab has its own copy button: **Copy DSL** copies DSL, and **Copy MusicXML** copies XML. **Download** in the MusicXML tab saves an uncompressed `.musicxml` file. **Export score** saves the full ChromaPlay project, including the main format and its original source. The initial tempo and time signature controls are read-only when MusicXML is main; edit those values in the XML source instead.
 
+### Scan a sheet image or PDF
+
+**Scan sheet** converts printed sheet music to MusicXML using the public [LEGATO demo on Hugging Face](https://huggingface.co/spaces/guangyangmusic/legato-demo).
+
+1. Open **Scan sheet** and select a `.png`, `.jpg`, `.jpeg`, `.webp`, or `.pdf` file, up to **16 MB**. The service limits PDFs to **3 pages**.
+2. Click **Convert** to upload that file for recognition. Selecting a file alone does not upload it.
+3. When conversion finishes, use **Download MusicXML** to keep the recognized source, or **Use this score** to open it in ChromaPlay.
+
+Your current score stays in place until you choose **Use this score**. The result opens with **MusicXML** as the main format and an automatically generated DSL view for playback. Check the notes against the original sheet and correct recognition mistakes before practicing.
+
+Clear, typeset scores work best. The public demo can have queues, usage limits, or downtime; recognition needs an internet connection. No API key, token, or ChromaPlay server is needed. See [Saving and privacy](#saving-and-privacy) for details about the uploaded file.
+
 ### What conversion keeps
 
 MusicXML conversion supports pitched notes, rests, dotted durations, ties, tempo changes, and time signature changes. Export writes a single harmonica part, splits notes at measure boundaries with ties where needed, and includes playing instructions for each note. Import accepts partwise and timewise scores and reads a single melody: the first part and its first voice/staff. Written instrument transpositions are applied to get sounding pitches. Extra parts, voices, chord tones, and grace notes are omitted; repeats are not expanded. Conversion warnings explain when information is omitted or adjusted.
@@ -156,7 +169,7 @@ DSL supports a smaller set of note lengths and timing settings than MusicXML. Rh
 
 ChromaPlay XML exports include the original DSL text as metadata. If the musical content is unchanged, importing that file restores the exact DSL, including spaces, `L` markers, and visual separators. If the score has changed, ChromaPlay converts the current MusicXML instead of restoring an outdated copy. Other music apps may remove this metadata, so use `.chroma.json` to save a complete ChromaPlay project.
 
-Only uncompressed `.musicxml` and `.xml` files are supported. For a compressed `.mxl` file, export an uncompressed MusicXML file from the app that created it first. Conversion runs entirely in the browser.
+Direct MusicXML import supports uncompressed `.musicxml` and `.xml` files. For a compressed `.mxl` file, export an uncompressed MusicXML file from the app that created it first. Conversion between MusicXML and DSL runs entirely in the browser.
 
 ### Harmonica playing instructions
 
@@ -319,7 +332,9 @@ The current score and settings autosave to this browser's local storage, includi
 
 Backing audio stays in the current tab. It is not saved in local storage or included in an exported score. Select the file again after reloading the app or opening a score in another tab.
 
-ChromaPlay does not upload your score or selected audio files. The stylesheet loads fonts from Google Fonts, and the site host receives normal page and asset requests. The app has no analytics code.
+Your current score and backing audio stay in your browser. When you click **Convert** in **Scan sheet**, the selected sheet image or PDF is uploaded to the external LEGATO demo for recognition. Read the [LEGATO service page](https://huggingface.co/spaces/guangyangmusic/legato-demo) and [Hugging Face privacy policy](https://huggingface.co/privacy) for information about that service.
+
+The stylesheet loads fonts from Google Fonts, and the site host receives normal page and asset requests. ChromaPlay has no analytics code.
 
 ## Development
 
@@ -335,6 +350,8 @@ npm run build
 | `app.js` | Interface, project state, and playback controls |
 | `notation.js` | Notation parser, timing commands, and pitch mapping |
 | `musicxml.js` | MusicXML conversion, harmonica annotations, and conversion warnings |
+| `legato.js` | Browser requests to the public LEGATO recognition service |
+| `sheet-import.js` | Scan sheet dialog, conversion progress, and result import/download |
 | `score-formats.js` | Main format selection and generated score views |
 | `sheet-music.js` | Live sheet rendering, zoom, scrolling, and the playback line |
 | `sheet-timing.js` | Mapping playback beats to positions in the original sheet |

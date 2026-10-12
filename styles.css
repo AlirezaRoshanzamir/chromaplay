@@ -62,6 +62,25 @@ main{max-width:1440px;margin:auto;padding:39px max(5vw,24px) 0}.page-heading{dis
 .format-dialog-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 10px; margin-top: 25px; }
 .confirm-format { background: #d0e8bc; color: #35502b; }
 #format-dialog h2 { font-size: 20px; }
+.page-heading { gap: 24px; }
+.page-heading > div:first-child { min-width: 0; }
+.file-actions { flex-wrap: wrap; flex-shrink: 0; }
+#sheet-import-dialog { max-width: 650px; max-height: calc(100dvh - 32px); overflow: auto; }
+#sheet-import-dialog h2 { margin: 0; font-size: 22px; }
+#sheet-import-dialog p, #sheet-import-dialog details { font-size: 12px; line-height: 1.65; color: #65735d; }
+#sheet-import-dialog a { color: #456b37; text-underline-offset: 3px; }
+.sheet-file-label { display: block; font-size: 12px; font-weight: 600; margin: 22px 0 9px; }
+#sheet-import-file { width: 100%; font: inherit; font-size: 12px; color: #536448; background: #f1f4eb; border: 1px solid #dce4d3; border-radius: 7px; padding: 10px; }
+#sheet-import-file::file-selector-button { border: 0; border-radius: 4px; background: #e0ead5; color: #3f5934; font: inherit; padding: 8px 12px; margin-right: 10px; cursor: pointer; }
+#sheet-import-status { padding: 12px; border-radius: 6px; background: #eef4e6; color: #425b36!important; overflow-wrap: anywhere; }
+#sheet-import-status.sheet-import-error { background: #fbefe8; color: #92523b!important; }
+#sheet-import-result { border-top: 1px solid #e0e6d6; margin-top: 18px; }
+#sheet-import-result details { margin: 12px 0; }
+#sheet-import-result summary { cursor: pointer; }
+#sheet-import-warning-list { padding-left: 20px; max-height: 140px; overflow: auto; }
+#sheet-import-source { display: block; width: 100%; height: 180px; resize: vertical; margin-top: 8px; border: 1px solid #dce4d3; border-radius: 6px; padding: 10px; background: #fafbf7; color: #3b5032; font: 11px/1.6 monospace; }
+.sheet-import-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 8px; margin-top: 20px; }
+@media(max-width:1000px) { .page-heading { flex-wrap: wrap; gap: 14px; } }
 @media(max-width:580px) { .score-format-toolbar { gap: 8px; padding-bottom: 10px; } .score-tabs button { padding: 10px 9px; } .main-format-label { margin-left: auto; } #musicxml-source { font-size: 11px; height: 300px; } }
 .score-settings { display: flex; align-items: center; flex-wrap: wrap; gap: 24px 36px; margin-bottom: 21px; }
 .tempo-stepper { display: flex; align-items: center; gap: 6px; }
