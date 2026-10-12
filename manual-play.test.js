@@ -26,6 +26,7 @@ class FakeTarget {
   closest(selector) {
     if (selector === '[data-hole]') return this.dataset.hole ? this : null;
     if (this.attributes.role === 'slider' && selector.includes('[role="slider"]')) return this;
+    if (this.attributes.role === 'separator' && selector.includes('[role="separator"]')) return this;
     if (this.attributes.role === 'textbox' && selector.includes('[role="textbox"]')) return this;
     return this.blocked ? this : null;
   }
@@ -297,10 +298,10 @@ test('editing, dialogs, composing, and modified shortcuts do not play or consume
   assert.equal(f.sliderButton.attributes['aria-pressed'], 'false');
 });
 
-test('a focused waveform slider keeps navigation and number keys out of manual playing', t => {
+for (const role of ['slider', 'separator']) test(`a focused ${role} keeps navigation and number keys out of manual playing`, t => {
   const f = setup(t);
   const waveform = new FakeTarget();
-  waveform.setAttribute('role', 'slider');
+  waveform.setAttribute('role', role);
   for (const code of ['ArrowLeft', 'ArrowRight', 'Home', 'End', 'Digit1', 'Minus', 'Equal', 'Space', 'KeyD', 'KeyS']) {
     assert.equal(f.down(code, { target: waveform }).defaultPrevented, false, code);
     assert.equal(f.up(code, { target: waveform }).defaultPrevented, false, code);

@@ -23,6 +23,7 @@ Follow the falling notes or play the harmonica directly with your mouse and keyb
 - Local backing tracks that can play alongside a score or on their own.
 - Plain-text copying, score import/export, and browser autosave.
 - Hide/Show controls for each main panel and a compact player fixed at the bottom of the screen.
+- One or two columns, centered or full-width panels, adjustable row heights, and a draggable column divider.
 
 ChromaPlay is a static HTML, CSS, and JavaScript app with no application backend or account system. Sheet music uses a locally bundled copy of OpenSheetMusicDisplay. Score conversion, rendering, and playback run in your browser.
 
@@ -40,6 +41,14 @@ Editing notation or changing the score's timing controls pauses playback and ret
 To use an existing MusicXML score, import a `.musicxml` or `.xml` file. It opens with **MusicXML** as the main format, and the **DSL** tab shows the playable conversion.
 
 Use **Hide** on a panel to collapse its contents while keeping its heading visible. **Show** opens it again. The bottom player can also be collapsed, and hiding a panel does not stop playback.
+
+### Arrange the panels
+
+Use the layout controls above the panels to choose **1 column** or **2 columns**, and a centered width or **Full width**.
+
+Drag a bottom handle to change the height. In one column, each panel has its own height. In two columns, both panels in a row share the same height, and dragging the divider between the columns changes their widths together.
+
+You can also focus a handle with Tab and use the arrow keys to resize. Press Home or double-click a handle to restore automatic row height or equal column widths. **Reset layout** restores one centered column and clears custom sizes. Your layout and each mode's heights stay in your browser, separately from exported scores. Narrow screens show one column automatically and restore your chosen layout when there is enough room.
 
 ### Run locally
 
@@ -168,7 +177,7 @@ The converter checks that the instruction matches the note's sounding pitch. If 
 
 ![Sheet music with a moving playback line, zoom controls, and Follow playback](docs/screenshots/sheet-music.jpg)
 
-The **Sheet music** panel sits below the score editor and updates after you edit the score. When DSL is main, it displays the generated MusicXML. When MusicXML is main, it displays the original score, including supported details that the DSL conversion cannot express.
+The **Sheet music** panel follows the score editor and updates after you edit the score. When DSL is main, it displays the generated MusicXML. When MusicXML is main, it displays the original score, including supported details that the DSL conversion cannot express.
 
 A vertical line moves smoothly through the sheet as the Notes part plays, including through rests. Use the existing **Play**, **Pause**, **Restart**, **Previous**, **Next**, and timeline controls. The line follows tempo changes, the Notes start delay, and global playback speed. Setting Notes volume to 0% keeps the line moving for silent practice. Backing track and metronome controls keep their existing behavior.
 
@@ -262,7 +271,7 @@ Playback speed defaults to **1x**, autosaves, and is included in exported projec
 
 ### Adjusting the visualizer
 
-Drag the horizontal handle at the bottom of the visualization card up or down to resize the visualizer from **180 to 640 pixels** tall. ChromaPlay remembers this display preference in your browser, separately from the score.
+Drag the bottom handle of the visualization panel's row up or down to change its height. In two-column mode, the other panel in that row resizes with it. ChromaPlay remembers this display preference in your browser, separately from the score.
 
 Short notes keep their hole and slider labels, using a smaller font when needed. The visible time window adjusts with the visualizer height to keep those notes readable.
 

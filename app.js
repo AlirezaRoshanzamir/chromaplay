@@ -9,6 +9,7 @@ import { WaveformTimeline } from './waveform.js';
 import { DEFAULT_PROJECT, validateProject, parseProjectFile, serializeProject } from './project.js';
 import { deriveScoreFormats, switchScoreFormat } from './score-formats.js';
 import { SheetMusic } from './sheet-music.js';
+import { WorkspaceLayout } from './workspace-layout.js';
 
 const $ = (id) => document.getElementById(id);
 const icons = {
@@ -67,51 +68,6 @@ const audio = new PracticeAudio({
 const visualizer = new HarmonicaVisualizer($('visualizer'), { onSeek: beat => { void seekTo(transportBeatAtScoreBeat(beat)); } });
 const waveforms = new WaveformTimeline($('waveform-timeline'), { onSeek: seconds => { void seekTo(seconds * project.tempo / 60); } });
 const sheetMusic = new SheetMusic($('sheet-card'));
-const VISUALIZER_HEIGHT_KEY = 'chromaplay.visualizerHeight.v1';
-const resizeHandle = $('visualizer-resize');
-function applyVisualizerHeight(value) {
-  const height = Math.min(640, Math.max(180, Math.round(Number(value) || 320)));
-  resizeHandle.setAttribute('aria-valuenow', height);
-  resizeHandle.setAttribute('aria-valuetext', `${height} pixels`);
-  $('visualizer').parentElement.style.setProperty('--visualizer-height', `${height}px`);
-}
-try { applyVisualizerHeight(localStorage.getItem(VISUALIZER_HEIGHT_KEY)); }
-catch { applyVisualizerHeight(320); }
-function saveVisualizerHeight() {
-  try { localStorage.setItem(VISUALIZER_HEIGHT_KEY, resizeHandle.getAttribute('aria-valuenow')); }
-  catch { /* The height still works when browser storage is unavailable. */ }
-}
-let resizing = null;
-resizeHandle.addEventListener('pointerdown', event => {
-  if (event.button !== 0 || resizing) return;
-  event.preventDefault();
-  resizeHandle.focus({ preventScroll: true });
-  resizing = { pointerId: event.pointerId, y: event.clientY, height: $('visualizer').getBoundingClientRect().height };
-  resizeHandle.setPointerCapture(event.pointerId);
-  document.body.classList.add('resizing-visualizer');
-});
-resizeHandle.addEventListener('pointermove', event => {
-  if (resizing?.pointerId !== event.pointerId) return;
-  applyVisualizerHeight(resizing.height + event.clientY - resizing.y);
-});
-function finishVisualizerResize(event) {
-  if (!resizing || (event.pointerId != null && event.pointerId !== resizing.pointerId)) return;
-  const { pointerId } = resizing;
-  resizing = null;
-  if (resizeHandle.hasPointerCapture(pointerId)) resizeHandle.releasePointerCapture(pointerId);
-  document.body.classList.remove('resizing-visualizer');
-  saveVisualizerHeight();
-}
-['pointerup', 'pointercancel', 'lostpointercapture'].forEach(name => resizeHandle.addEventListener(name, finishVisualizerResize));
-window.addEventListener('blur', finishVisualizerResize);
-resizeHandle.addEventListener('keydown', event => {
-  const height = Number(resizeHandle.getAttribute('aria-valuenow'));
-  const next = { ArrowUp: height - 10, ArrowDown: height + 10, Home: 180, End: 640 }[event.key];
-  if (next === undefined) return;
-  event.preventDefault();
-  applyVisualizerHeight(next);
-  saveVisualizerHeight();
-});
 const noteEditor = new NoteEditor($('note-editor'), {
   onEditStart: () => { if (audio.isPlaying || pendingPlay) pausePlayback(); },
   onChange: source => { if (project.scoreFormat === 'musicxml') return; stopForEdit(); project.notation = source; refreshScore({ reset: true }); save(); },
@@ -730,7 +686,7 @@ const guide = $('guide-dialog');
 $('close-guide').addEventListener('click', () => guide.close());
 guide.addEventListener('click', event => { const rect = guide.getBoundingClientRect(); if (event.target === guide && (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom)) guide.close(); });
 document.addEventListener('keydown', event => {
-  if (event.defaultPrevented || guide.open || $('format-dialog').open || event.altKey || event.ctrlKey || event.metaKey || event.target.closest('input,textarea,select,button,[role=textbox],[role=slider]')) return;
+  if (event.defaultPrevented || guide.open || $('format-dialog').open || event.altKey || event.ctrlKey || event.metaKey || event.target.closest('input,textarea,select,button,[role=textbox],[role=slider],[role=separator]')) return;
   if (event.code === 'ArrowRight') { event.preventDefault(); stepNote(1); }
   if (event.code === 'Home') { event.preventDefault(); void seekTo(timeline.startBeat); }
 });
@@ -760,5 +716,21 @@ const updateDockHeight = () => {
 };
 new ResizeObserver(updateDockHeight).observe(playbackDock);
 updateDockHeight();
+const workspace = $('workspace');
+workspace.addEventListener('workspace-layout-change', () => requestAnimationFrame(() => renderPosition()));
+new WorkspaceLayout({
+  workspace,
+  captureSelection: () => document.activeElement === noteEditor.editor ? {
+    selection: noteEditor.selection(),
+    activeRange: noteEditor.activeRange && { ...noteEditor.activeRange },
+  } : null,
+  restoreSelection: saved => {
+    // Moving a focused editor commits its chips on blur. Restore source offsets
+    // and the open chip after the panels have reached their new rows.
+    noteEditor.activeRange = saved.activeRange;
+    noteEditor.render(saved.selection);
+    noteEditor.restoreSelection(saved.selection, true);
+  },
+});
 applyProject();
 if (storageWarning) notify('Your saved score could not be restored. You can import a backup.', true);
