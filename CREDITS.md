@@ -1,6 +1,16 @@
-# Sound credits
+# Credits
 
-ChromaPlay's synthesized reed uses its own Web Audio oscillator. The two sampled sounds below are bundled with the app, so playback does not contact a sample CDN. They are audio recordings, not JavaScript libraries.
+ChromaPlay's sheet renderer and sampled sounds are bundled with the app. Rendering and playback do not contact an external rendering service or sample CDN. The synthesized reed uses ChromaPlay's own Web Audio oscillator.
+
+## OpenSheetMusicDisplay
+
+The **Sheet music** panel uses [OpenSheetMusicDisplay 2.2.1](https://github.com/opensheetmusicdisplay/opensheetmusicdisplay/releases/tag/2.2.1), copyright 2019 PhonicScore, under the **BSD-3-Clause** license.
+
+ChromaPlay includes the unmodified browser bundle from the official `opensheetmusicdisplay` npm package and serves it locally from `assets/vendor/osmd/opensheetmusicdisplay.min.js`. The app renders MusicXML in the browser without sending score data to another service.
+
+- [OpenSheetMusicDisplay license](assets/vendor/osmd/LICENSE)
+- [License and copyright notices for libraries included in the bundle](assets/vendor/osmd/opensheetmusicdisplay.min.js.LICENSE.txt), including JSZip under its MIT license option
+- [Pinned source, release, package, and bundle checksum](assets/vendor/osmd/README.md)
 
 ## FluidR3 harmonica
 

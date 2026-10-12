@@ -13,6 +13,7 @@ Follow the falling notes or play the harmonica directly with your mouse and keyb
 - A simple notation language for holes, blow/draw, the slider, note lengths, and rests.
 - An inline score editor with duration-sized note boxes, breath colors, and a moving playhead.
 - DSL and MusicXML tabs, with one editable main format and an automatically converted view of the other.
+- Live sheet music with a moving playhead, zoom, and automatic scrolling during playback.
 - A falling-note visualizer across all 12 holes, with adjustable height and labels for short notes.
 - Tempo and time signature changes anywhere in the score, with editable timing boxes and controls for the initial settings, plus a metronome, looping, seeking, and note-by-note navigation.
 - Three sounds: synthesized reed, FluidR3 harmonica, and recorded VCSL chromatic harmonica.
@@ -22,7 +23,7 @@ Follow the falling notes or play the harmonica directly with your mouse and keyb
 - Local backing tracks that can play alongside a score or on their own.
 - Plain-text copying, score import/export, and browser autosave.
 
-ChromaPlay is a static HTML, CSS, and JavaScript app. It has no application backend, account system, or third-party JavaScript dependencies.
+ChromaPlay is a static HTML, CSS, and JavaScript app with no application backend or account system. Sheet music uses a locally bundled copy of OpenSheetMusicDisplay. Score conversion, rendering, and playback run in your browser.
 
 ## Getting started
 
@@ -159,6 +160,22 @@ Pitch alone cannot distinguish every playing option. For example, `4q`, `5q`, an
 Put this inside the relevant `<note>`. Use `hole=1` through `hole=12`, `breath=blow` or `breath=draw`, and `slide=in` or `slide=out`. The example means draw hole 4 with the slider pressed. It must accompany a C5 pitch. The `#` in DSL means pressing the slider, not necessarily playing a sharp pitch.
 
 The converter checks that the instruction matches the note's sounding pitch. If it does not match, ChromaPlay warns and chooses a fingering from the pitch. Without an instruction, it also chooses a playable fingering automatically. Other MusicXML apps can display the technical text, but may not interpret it as harmonica tablature.
+
+## Sheet music
+
+![Sheet music with a moving playback line, zoom controls, and Follow playback](docs/screenshots/sheet-music.jpg)
+
+The **Sheet music** panel updates after you edit the score. When DSL is main, it displays the generated MusicXML. When MusicXML is main, it displays the original score, including supported details that the DSL conversion cannot express.
+
+A vertical line moves smoothly through the sheet as the Notes part plays, including through rests. Use the existing **Play**, **Pause**, **Restart**, **Previous**, **Next**, and timeline controls. The line follows tempo changes, the Notes start delay, and global playback speed. Setting Notes volume to 0% keeps the line moving for silent practice. Backing track and metronome controls keep their existing behavior.
+
+Use **-** and **+** to zoom from **60% to 150%**. **Follow playback** scrolls the sheet to keep the line in view; turn it off to scroll yourself while the line continues to move. **Hide** collapses the sheet without stopping playback, and **Show** opens it again.
+
+The sheet can display all parts of a MusicXML score, while playback uses only the first part's selected melody. Chords, lyrics, dynamics, and other displayed details may therefore differ from what you hear. Check **Conversion notes** in the score panel for details about the playable conversion.
+
+The preview accepts up to **2,500 note elements**, including rests, and **600 measure elements counted across all parts**. For example, two parts with 300 measures each reach the measure limit. These limits apply only to sheet rendering; editing and playback remain available. If rendering fails, the panel shows a message and a **Retry sheet music** button.
+
+Rendering uses [OpenSheetMusicDisplay 2.2.1](https://github.com/opensheetmusicdisplay/opensheetmusicdisplay/releases/tag/2.2.1), bundled with the app under the BSD-3-Clause license. It loads from the same site as ChromaPlay and does not send the score to a rendering service. See [software and sound credits](CREDITS.md) for its license and bundled dependency notices.
 
 ## Playing the harmonica
 
@@ -304,6 +321,9 @@ npm run build
 | `notation.js` | Notation parser, timing commands, and pitch mapping |
 | `musicxml.js` | MusicXML conversion, harmonica annotations, and conversion warnings |
 | `score-formats.js` | Main format selection and generated score views |
+| `sheet-music.js` | Live sheet rendering, zoom, scrolling, and the playback line |
+| `sheet-timing.js` | Mapping playback beats to positions in the original sheet |
+| `assets/vendor/osmd/` | OpenSheetMusicDisplay browser bundle, license, and dependency notices |
 | `score-timing.js` | Tempo map, time conversion, changing meters, bar lines, and metronome pulses |
 | `note-editor.js` | Inline editing and score playhead |
 | `note-style.js` | Note colors and duration widths |

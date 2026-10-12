@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { mkdir, readFile, writeFile, copyFile, cp, rm } from 'node:fs/promises';
 
-const files = ['index.html', 'styles.css', 'app.js', 'notation.js', 'score-timing.js', 'musicxml.js', 'score-formats.js', 'project.js', 'audio.js', 'background-player.js', 'instrument.js', 'timeline.js', 'waveform.js', 'visualizer.js', 'note-editor.js', 'note-style.js', 'manual-play.js', 'favicon.svg', 'CREDITS.md'];
+const files = ['index.html', 'styles.css', 'app.js', 'notation.js', 'score-timing.js', 'musicxml.js', 'score-formats.js', 'sheet-music.js', 'sheet-timing.js', 'project.js', 'audio.js', 'background-player.js', 'instrument.js', 'timeline.js', 'waveform.js', 'visualizer.js', 'note-editor.js', 'note-style.js', 'manual-play.js', 'favicon.svg', 'CREDITS.md'];
 const sources = new Map(await Promise.all(files.map(async file => [file, await readFile(new URL(`../${file}`, import.meta.url), 'utf8')])));
 const revision = createHash('sha256').update(JSON.stringify([...sources])).digest('hex').slice(0, 12);
 const versioned = new Map(files.filter(file => /\.(js|css)$/.test(file)).map(file => [file, file.replace(/\.(js|css)$/, `.${revision}.$1`)]));

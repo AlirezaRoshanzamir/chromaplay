@@ -2,6 +2,8 @@
 
 These images show the main parts of ChromaPlay:
 
+- `sheet-music.jpg`: the MusicXML sheet preview, moving playback line, zoom, and follow controls.
+
 - `practice.jpg`: the visualizer, its resize handle, and playable harmonica.
 - `score-editor.jpg`: the DSL tab, editable tempo and time signature boxes, initial timing controls, note colors, and main-format selector.
 - `musicxml-editor.jpg`: the generated MusicXML tab, copy/download controls, and harmonica annotation guide.

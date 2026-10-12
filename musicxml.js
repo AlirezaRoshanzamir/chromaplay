@@ -358,7 +358,15 @@ function noteDuration(note, divisions, meter, warnings) {
   return beats;
 }
 
-/** Import one melody. Information the compact DSL cannot express is reported. */
+/**
+ * Import one melody. Information the compact DSL cannot express is reported.
+ * beatMap contains {sourceBeat, playbackBeat} boundaries in quarter-note units.
+ * Interpolate within each segment to follow the source during rounded playback;
+ * at repeated playback boundaries the last sourceBeat takes effect. The source
+ * timeline uses the first part's measure durations. sourceMeasureStarts contains
+ * one source beat per original measure, without a final end sentinel, so a sheet
+ * renderer can align measures whose other parts have a different duration.
+ */
 export function musicXmlToDsl(xml) {
   const root = parseXml(xml);
   const warnings = [];
@@ -366,11 +374,16 @@ export function musicXmlToDsl(xml) {
   const fields = descendants(root, 'miscellaneous-field');
   const savedDsl = fields.find(field => field.attrs.name === 'chromaplay:dsl');
   const savedHash = fields.find(field => field.attrs.name === 'chromaplay:fingerprint');
+  let preservedNotation = null;
+  let preservedParsed = null;
   if (savedDsl && savedHash && content(savedHash).trim() === fingerprint(root)) {
     const notation = content(savedDsl);
-    if (notation.length <= MAX_DSL_LENGTH && !parseNotation(notation).errors.length) return { notation, warnings, title };
+    if (notation.length <= MAX_DSL_LENGTH) {
+      const parsed = parseNotation(notation);
+      if (!parsed.errors.length) { preservedNotation = notation; preservedParsed = parsed; }
+    }
   }
-  if (savedDsl) warnOnce(warnings, 'The MusicXML content changed, so its embedded DSL was not reused. The notes and annotations were converted again.');
+  if (savedDsl && preservedNotation === null) warnOnce(warnings, 'The MusicXML content changed, so its embedded DSL was not reused. The notes and annotations were converted again.');
 
   let measures;
   if (root.name === 'score-partwise') {
@@ -401,7 +414,9 @@ export function musicXmlToDsl(xml) {
   const notes = [];
   const directives = [];
   const markers = [];
+  const sourceMeasureStarts = [];
   for (const [measureIndex, measure] of measures.entries()) {
+    sourceMeasureStarts.push(measureStart);
     let cursor = 0;
     let extent = 0;
     let previousNoteStart = 0;
@@ -481,6 +496,16 @@ export function musicXmlToDsl(xml) {
     if (measureStart > 100_000) throw new Error('The MusicXML score is too long to convert.');
   }
 
+  // Read the original XML measure timing above, but do not reconstruct or round
+  // an unchanged ChromaPlay source. Its playback and source beats are identical.
+  if (preservedNotation !== null) {
+    const boundaries = [...new Set([0, ...preservedParsed.notes.map(note => note.endBeat), ...preservedParsed.directives.map(directive => directive.beat)])].sort((a, b) => a - b);
+    return {
+      notation: preservedNotation, warnings: [], title, sourceMeasureStarts,
+      beatMap: boundaries.map(beat => ({ sourceBeat: beat, playbackBeat: beat })),
+    };
+  }
+
   notes.sort((a, b) => a.start - b.start || a.order - b.order);
   const melody = [];
   for (const note of notes) {
@@ -500,14 +525,33 @@ export function musicXmlToDsl(xml) {
   let directiveIndex = 0;
   let markerIndex = 0;
   let position = 0;
+  let playbackBeat = 0;
+  const beatMap = [{ sourceBeat: 0, playbackBeat: 0 }];
+  const recordBoundary = sourceBeat => {
+    const previous = beatMap.at(-1);
+    // The importer tolerates sub-EPSILON overlaps from fractional divisions;
+    // that rounding noise must not make the sheet cursor run backward.
+    sourceBeat = Math.max(previous.sourceBeat, sourceBeat);
+    if (sourceBeat !== previous.sourceBeat || playbackBeat !== previous.playbackBeat) beatMap.push({ sourceBeat, playbackBeat });
+  };
   markers.sort((a, b) => a.beat - b.beat || a.token.localeCompare(b.token));
-  const emitDuration = (note, beats, split = false) => {
+  const emitDuration = (note, from, to, split = false) => {
+    const beats = to - from;
     if (beats <= EPSILON) return;
     const units = Math.max(2, Math.round(beats * 8));
     if (Math.abs(units / 8 - beats) > EPSILON) warnOnce(warnings, 'Durations shorter than a sixteenth note or between supported values were rounded to nearby DSL durations.');
     const pieces = partsForUnits(units);
     if (note.hole && (split || pieces.length > 1)) warnOnce(warnings, 'Some sustained notes were split into several DSL notes and will be articulated again during playback.');
-    for (const [, length] of pieces) output.push(`${note.draw ? '-' : ''}${note.hole}${note.slider && note.hole ? '#' : ''}${length}`);
+    recordBoundary(from);
+    let emittedUnits = 0;
+    for (const [pieceUnits, length] of pieces) {
+      output.push(`${note.draw ? '-' : ''}${note.hole}${note.slider && note.hole ? '#' : ''}${length}`);
+      emittedUnits += pieceUnits;
+      playbackBeat += pieceUnits / 8;
+      // A rounded sustained span is traversed at a constant ratio, including
+      // when its duration requires several DSL notes. Preserve exact endpoints.
+      recordBoundary(emittedUnits === units ? to : from + beats * emittedUnits / units);
+    }
   };
   const emitMarkers = at => {
     while (markerIndex < markers.length && markers[markerIndex].beat <= at + EPSILON) {
@@ -524,11 +568,11 @@ export function musicXmlToDsl(xml) {
     emitDirectives(cursor);
     while (directiveIndex < directives.length && directives[directiveIndex].beat < to - EPSILON) {
       const change = directives[directiveIndex].beat;
-      emitDuration(note, change - cursor, true);
+      emitDuration(note, cursor, change, true);
       cursor = change;
       emitDirectives(cursor);
     }
-    emitDuration(note, to - cursor, cursor !== from);
+    emitDuration(note, cursor, to, cursor !== from);
   };
   const rest = { hole: 0, draw: false, slider: false };
   for (const note of melody) {
@@ -547,5 +591,5 @@ export function musicXmlToDsl(xml) {
   const notation = output.join(' ').replace(/\s*\|\s*/g, ' | ').replace(/\s*L\s*/g, ' L\n').trim();
   if (notation.length > MAX_DSL_LENGTH) throw new Error('The converted DSL exceeds the 100,000 character limit.');
   if (parseNotation(notation).errors.length) throw new Error('This MusicXML score could not be represented as valid ChromaPlay notation.');
-  return { notation, warnings, title };
+  return { notation, warnings, title, beatMap, sourceMeasureStarts };
 }
