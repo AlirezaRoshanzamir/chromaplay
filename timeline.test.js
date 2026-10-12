@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createTimeline } from './timeline.js';
+import { parseNotation } from './notation.js';
+import { createScoreTiming } from './score-timing.js';
 
 const notes = [{ startBeat: 0, endBeat: 8 }];
 
@@ -91,4 +93,31 @@ test('negative metronome offsets retain their grid origin while playback starts 
   const empty = createTimeline({ metronome: true, metronomeOffset: 10 });
   assert.equal(empty.hasMetronome, false);
   assert.equal(empty.durationSeconds, 0);
+});
+
+test('score timing changes determine duration while all clip offsets stay in source seconds', () => {
+  const parsed = parseNotation('TEMPO 60 TSIG 4/4 1w TEMPO 120 2w TSIG 3/8 TEMPO 30 3h');
+  const timing = createScoreTiming(parsed);
+  const timeline = createTimeline({ notes: parsed.notes, bpm: parsed.tempo, timing, noteOffset: -2,
+    backgroundDuration: 12, backgroundOffset: 1, metronome: true, metronomeOffset: 2 });
+  assert.equal(timeline.timing, timing);
+  assert.equal(timeline.scoreBeats, 10);
+  assert.equal(timeline.scoreDuration, 10);
+  assert.equal(timeline.noteEndSeconds, 8);
+  assert.equal(timeline.backgroundEndSeconds, 13);
+  assert.equal(timeline.metronomeEndSeconds, 14);
+  assert.equal(timeline.startSeconds, 0);
+  assert.equal(timeline.endSeconds, 14);
+});
+
+test('variable tempo timelines keep transport beats relative to the initial tempo', () => {
+  const parsed = parseNotation('TEMPO 120 1h TEMPO 60 2h');
+  const timing = createScoreTiming(parsed);
+  const timeline = createTimeline({ notes: parsed.notes, bpm: parsed.tempo, timing, noteOffset: 1 });
+  assert.equal(timeline.scoreBeats, 4);
+  assert.equal(timeline.scoreDuration, 3);
+  assert.equal(timeline.noteStartBeat, 2);
+  assert.equal(timeline.noteEndBeat, 8);
+  assert.equal(timeline.durationBeats, 8);
+  assert.equal(createTimeline({ notes: parsed.notes, bpm: parsed.tempo, timing, noteOffset: -4 }).endSeconds, 0);
 });

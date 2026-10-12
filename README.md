@@ -13,7 +13,7 @@ Follow the falling notes or play the harmonica directly with your mouse and keyb
 - A simple notation language for holes, blow/draw, the slider, note lengths, and rests.
 - An inline score editor with duration-sized note boxes, breath colors, and a moving playhead.
 - A falling-note visualizer across all 12 holes, with adjustable height and labels for short notes.
-- Tempo and time signature controls in the score panel, synced with text headers, plus a metronome, looping, seeking, and note-by-note navigation.
+- Tempo and time signature changes anywhere in the score, with editable timing boxes and controls for the initial settings, plus a metronome, looping, seeking, and note-by-note navigation.
 - Three sounds: synthesized reed, FluidR3 harmonica, and recorded VCSL chromatic harmonica.
 - A playable harmonica with mouse, touch, and keyboard controls.
 - Compact Notes, Track, and Metronome waveform rows on one zoomable timeline, each with its own volume and start delay.
@@ -29,7 +29,7 @@ Open the [live app](https://alirezaroshanzamir.github.io/chromaplay/), try the i
 
 1. Choose **Blank score** from the example menu, or edit the existing notes.
 2. Enter notation such as `1q -1q 2q -2q | 3h 0h`.
-3. Set the tempo and time signature with the score panel controls, or write `TEMPO 90` and `TSIG 4/4` on their own lines at the top. The controls and headers stay in sync. Without headers, the score uses 60 BPM and 4/4.
+3. Set the initial tempo and time signature with the score controls, or write `TEMPO 90` and `TSIG 4/4` before the first note. Add more timing commands between notes wherever they change. Without initial commands, the score starts at 60 BPM and 4/4.
 4. Choose a sound, press **Play**, and follow the notes. Add a backing track if you want to play along.
 
 Editing notation or changing the score's timing controls pauses playback and returns to the beginning. Invalid notation is highlighted and must be fixed before playback or export.
@@ -48,7 +48,7 @@ Open [http://127.0.0.1:5173](http://127.0.0.1:5173). The local server serves sta
 
 ## Writing notes
 
-Start a score with optional tempo and time signature headers:
+Start a score with optional tempo and time signature commands:
 
 ```text
 TEMPO 90
@@ -56,7 +56,7 @@ TSIG 4/4
 1q -1q 2q -2q | 3h 0h
 ```
 
-Keep each header on its own line before the notes. Either header may be omitted; defaults are `TEMPO 60` and `TSIG 4/4`. `TEMP` is also accepted as an alias for `TEMPO`. The score panel's tempo and time signature controls update these headers, and editing a header updates its control. These settings stay in copied and exported notation.
+Timing commands can be on their own lines or inline between notes. Each applies from its position until the next command of the same kind. `TEMP` is also accepted as an alias for `TEMPO`. The **Initial tempo** and **Initial time signature** controls reflect only the settings before the first note, with defaults of 60 BPM and 4/4. Editing those controls leaves later changes alone. Commands stay in copied and exported notation.
 
 Each note has this form:
 
@@ -89,7 +89,7 @@ A dotted quarter note (`1q.`) lasts 1.5 quarter-note beats. Dots also work with 
 
 ### Spacing and line breaks
 
-Within the notes, spaces, tabs, newlines, and `|` do not affect playback, even when placed inside a note. Tempo and time signature headers need their own lines. These note examples sound the same:
+Within the notes, spaces, tabs, newlines, and `|` do not affect playback, even when placed inside a note. Timing commands need a space after the keyword and a complete value on the same line. Separate the value from the following note with a space or newline. These note examples sound the same:
 
 ```text
 1q -1q 2q -2q | 3h 0h
@@ -110,6 +110,8 @@ This displays two rows. Put `L` between complete notes, not inside a note. When 
 ### Editing note boxes
 
 Completed notes become compact, rounded boxes in the editor. Space, Enter, Tab, or leaving the editor finishes a note. Click a box to edit its original text. Plain-text copy/paste and undo/redo work in the editor; **Copy notes** copies the entire score.
+
+Valid `TEMPO` and `TSIG` commands become compact timing boxes in the same editor. Click one to edit its text, then press Tab or click outside the editor to finish. Timing boxes add no duration and keep the original text when copied or exported.
 
 Box width follows duration: a whole note is twice as wide as a half note, and a dot adds 50%. Widths adjust so four whole notes and their usual separators fit on one line. Very short boxes may shorten their labels; hover or click to read the full note.
 
@@ -162,21 +164,24 @@ The selected sound autosaves and is included in exported projects. Sample loadin
 
 ## Tempo and playback
 
-Use the tempo minus/plus buttons or BPM field and the time signature controls in the score panel. You can also write `TEMPO number` and `TSIG numerator/denominator` at the top of the score, before any notes. Changing a control updates its header; editing a header updates the controls.
+Use the **Initial tempo** and **Initial time signature** controls in the score panel to change the starting settings. They stay in sync with commands before the first note and do not follow later changes during playback. If a starting setting appears more than once, the last one takes effect and is the one its control updates.
 
-The headers can appear in either order, with one setting per line. Duplicate settings and headers placed after notes are reported as errors. `TEMP` is accepted as a shorter spelling of `TEMPO`.
+Write `TEMPO number` or `TSIG numerator/denominator` anywhere between complete notes to change the music from that point. Commands can share a line, repeat, or appear on separate lines. `TEMP` is accepted as a shorter spelling of `TEMPO`. Try **Tempo and meter changes** in the example menu.
 
 ```text
-TEMPO 70
-TSIG 6/8
-1q. 2e 3e 2e | -1q. -2q.
+TEMPO 60 TSIG 4/4
+1q -1q 2q -2q
+TEMPO 120 TSIG 6/8 3q. -3q.
+TEMPO 90 2q. 1q.
 ```
 
 Tempo defaults to **60 BPM**, accepts whole numbers from **30-300**, and always counts quarter notes, including in `6/8`. At 60 BPM and normal playback speed (1x), a quarter note lasts one second and an eighth note lasts half a second.
 
 The time signature defaults to **4/4**. It accepts a numerator of **1-32** and a denominator of **2, 4, 8, or 16**. It controls visual bar lines and metronome pulses and accents without changing written note lengths. A `6/8` bar contains three quarter-note beats and six eighth-note metronome pulses.
 
-Tempo and meter are part of the score. Changing either with its control or header pauses playback and returns to the beginning. Removing a header restores that setting's default in the controls. Older saved projects keep their timing: ChromaPlay adds their existing tempo and time signature as score headers when first opening them.
+Tempo changes affect note lengths in seconds, metronome spacing, waveforms, and visual playheads. A time signature change starts a new bar and resets the metronome accent pattern, even if the preceding bar is incomplete. A tempo change alone keeps the current bar and accent pattern. A backing track keeps its own timing; it does not stretch at score tempo changes. Use the global Speed control to change all parts together.
+
+Editing a timing command or an initial control pauses playback and returns to the beginning. Removing all initial commands of one kind restores that setting's default; later commands stay in the score. Older saved projects keep their timing when opened. When the metronome continues beyond the notes, it keeps the final tempo and meter.
 
 Use **Previous** and **Next** to move through notes and rests, **Restart** to return to time zero, or the timeline to seek. **Pause** pauses all parts together. Playback continues until the notes, backing track, and enabled metronome have all finished, and **Loop** repeats that full timeline. A backing track can play on its own when the score is empty.
 
@@ -257,7 +262,8 @@ npm run build
 | File | Purpose |
 | --- | --- |
 | `app.js` | Interface, project state, and playback controls |
-| `notation.js` | Notation parser and pitch mapping |
+| `notation.js` | Notation parser, timing commands, and pitch mapping |
+| `score-timing.js` | Tempo map, time conversion, changing meters, bar lines, and metronome pulses |
 | `note-editor.js` | Inline editing and score playhead |
 | `note-style.js` | Note colors and duration widths |
 | `audio.js` | Web Audio synthesis, sampled instruments, and synchronized playback |

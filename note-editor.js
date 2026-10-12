@@ -1,7 +1,7 @@
 import { parseNotation } from './notation.js';
 import { noteColors, noteGeometry, editorBeatWidth } from './note-style.js';
 
-/** Keep the source unchanged while choosing which notes can become chips. */
+/** Keep the source unchanged while choosing which notes and timing events become chips. */
 export function editorSegments(source, activeRange = null) {
   const score = parseNotation(source);
   const segments = [];
@@ -9,7 +9,7 @@ export function editorSegments(source, activeRange = null) {
     let cursor = start;
     let marker = source.indexOf('L', cursor);
     while (marker >= 0 && marker < end) {
-      // Even an unfinished header stays plain text while it is being edited.
+      // Even an unfinished timing directive stays plain text while being edited.
       if (score.directives.some(directive => marker >= directive.start && marker < directive.end)) {
         marker = source.indexOf('L', marker + 1);
         continue;
@@ -22,13 +22,17 @@ export function editorSegments(source, activeRange = null) {
     if (cursor < end) segments.push({ type: 'text', text: source.slice(cursor, end), start: cursor, end });
   };
   let offset = 0;
-  for (const note of score.notes) {
-    const text = source.slice(note.start, note.end);
-    const active = activeRange && note.start < activeRange.end && note.end > activeRange.start;
+  const tokens = [
+    ...score.notes.map(note => ({ type: 'note', token: note })),
+    ...score.directives.filter(directive => directive.valid).map(directive => ({ type: 'directive', token: directive })),
+  ].sort((first, second) => first.token.start - second.token.start);
+  for (const { type, token } of tokens) {
+    const text = source.slice(token.start, token.end);
+    const active = activeRange && token.start < activeRange.end && token.end > activeRange.start;
     if (active || /[\r\n]/.test(text)) continue;
-    if (note.start > offset) appendText(offset, note.start);
-    segments.push({ type: 'note', text, start: note.start, end: note.end, note });
-    offset = note.end;
+    if (token.start > offset) appendText(offset, token.start);
+    segments.push({ type, text, start: token.start, end: token.end, [type === 'note' ? 'note' : 'directive']: token });
+    offset = token.end;
   }
   if (offset < source.length) appendText(offset, source.length);
   return { ...score, segments };
@@ -45,7 +49,7 @@ function sourceLength(node) {
   if (node.nodeType === 3) return node.data.length;
   if (node.nodeType !== 1) return 0;
   if (node.hasAttribute('data-editor-sentinel') || node.hasAttribute('data-editor-line-break')) return 0;
-  if (node.matches('.note-chip, .note-line-break')) return node.dataset.source.length;
+  if (node.matches('.note-chip, .timing-chip, .note-line-break')) return node.dataset.source.length;
   if (node.tagName === 'BR') return 1;
   return Array.from(node.childNodes).reduce((length, child) => length + sourceLength(child), 0);
 }
@@ -53,7 +57,7 @@ function sourceLength(node) {
 function sourceText(node) {
   if (node.nodeType === 3) return node.data;
   if (node.nodeType !== 1 || node.hasAttribute('data-editor-sentinel') || node.hasAttribute('data-editor-line-break')) return '';
-  if (node.matches('.note-chip, .note-line-break')) return node.dataset.source;
+  if (node.matches('.note-chip, .timing-chip, .note-line-break')) return node.dataset.source;
   if (node.tagName === 'BR') return '\n';
   let text = '';
   for (const child of node.childNodes) {
@@ -74,6 +78,7 @@ export class NoteEditor {
     this.activeRange = null;
     this.score = parseNotation('');
     this.chips = new Map();
+    this.directiveChips = new Map();
     this.position = -1;
     this.undoStack = [];
     this.redoStack = [];
@@ -128,7 +133,7 @@ export class NoteEditor {
     if (!node || !this.editor.contains(node) && node !== this.editor) return null;
     let total = 0;
     let current = node;
-    const chip = (node.nodeType === 1 ? node : node.parentElement)?.closest('.note-chip, .note-line-break');
+    const chip = (node.nodeType === 1 ? node : node.parentElement)?.closest('.note-chip, .timing-chip, .note-line-break');
     if (chip && this.editor.contains(chip)) {
       current = chip;
       total = offset === 0 ? 0 : sourceLength(chip);
@@ -200,6 +205,7 @@ export class NoteEditor {
     this.editor.classList.toggle('has-line-markers', result.segments.some(segment => segment.type === 'line-break'));
     this.root.classList.toggle('has-errors', result.errors.length > 0);
     this.chips.clear();
+    this.directiveChips.clear();
     const fragment = document.createDocumentFragment();
     for (const segment of result.segments) {
       if (segment.type === 'text') { fragment.append(document.createTextNode(segment.text)); continue; }
@@ -216,6 +222,23 @@ export class NoteEditor {
         const lineBreak = document.createElement('br');
         lineBreak.dataset.editorLineBreak = '';
         fragment.append(marker, lineBreak);
+        continue;
+      }
+      if (segment.type === 'directive') {
+        const directive = segment.directive;
+        const chip = document.createElement('span');
+        chip.className = `timing-chip ${directive.kind}`;
+        chip.contentEditable = 'false';
+        chip.dataset.source = segment.text;
+        chip.dataset.sourceStart = String(segment.start);
+        chip.dataset.sourceEnd = String(segment.end);
+        const label = directive.kind === 'tempo' ? `TEMPO ${directive.tempo}` : `TSIG ${directive.numerator}/${directive.denominator}`;
+        const description = directive.kind === 'tempo' ? `Tempo ${directive.tempo} BPM` : `Time signature ${directive.numerator}/${directive.denominator}`;
+        chip.textContent = label;
+        chip.title = `${description}. Applies to following notes. Click to edit.`;
+        chip.setAttribute('aria-label', `${description}. Click to edit.`);
+        fragment.append(chip);
+        this.directiveChips.set(directive.start, chip);
         continue;
       }
       const note = segment.note;
@@ -251,10 +274,18 @@ export class NoteEditor {
     this.setPosition(this.position);
   }
 
+  directiveAt(caret, source = this.source, directives = parseNotation(source).directives) {
+    return directives.find(directive => directive.start < caret && (
+      directive.end >= caret
+      || !directive.valid && /^[\t ]*$/.test(source.slice(directive.end, caret))
+    ));
+  }
+
   activeAt(caret) {
-    const notes = parseNotation(this.source).notes;
-    const note = notes.find(candidate => candidate.start < caret && candidate.end >= caret);
-    return note ? { start: note.start, end: note.end } : null;
+    const score = parseNotation(this.source);
+    const directive = this.directiveAt(caret, this.source, score.directives);
+    const token = directive ?? score.notes.find(note => note.start < caret && note.end >= caret);
+    return token ? { start: token.start, end: Math.max(token.end, caret) } : null;
   }
 
   applyEdit(start, end, text, { finish = false, kind = '' } = {}) {
@@ -294,7 +325,12 @@ export class NoteEditor {
     }
     if (type.startsWith('insert') && event.data !== null) {
       event.preventDefault();
-      const finish = /[\s|L]/.test(event.data);
+      const update = replaceNotation(this.source, start, end, event.data);
+      const directive = this.directiveAt(update.caret, update.source);
+      // A space between TEMPO and its value belongs to the editable token.
+      // A separator after a complete value can turn the token back into a chip.
+      const finish = /[\r\n|L]/.test(event.data)
+        || /\s/.test(event.data) && !(directive && (!directive.valid || update.caret < directive.end));
       this.applyEdit(start, end, event.data, { finish, kind: finish ? '' : 'typing' });
       return;
     }
@@ -302,9 +338,10 @@ export class NoteEditor {
       event.preventDefault();
       if (start === end) {
         const backward = /Backward$/.test(type);
-        const chipNote = this.score.notes.find(note => this.chips.has(note.index) && (backward ? note.end === start : note.start === end));
-        if (chipNote && !/Word|Line/.test(type)) {
-          this.openNote(chipNote, backward ? chipNote.end : chipNote.start);
+        const chipToken = this.score.notes.find(note => this.chips.has(note.index) && (backward ? note.end === start : note.start === end))
+          ?? this.score.directives.find(directive => this.directiveChips.has(directive.start) && (backward ? directive.end === start : directive.start === end));
+        if (chipToken && !/Word|Line/.test(type)) {
+          this.openToken(chipToken, backward ? chipToken.end : chipToken.start);
           return;
         }
         if (type === 'deleteWordBackward') start = this.wordBoundary(start, -1);
@@ -347,7 +384,7 @@ export class NoteEditor {
       this.restoreSelection({ anchor: 0, focus: this.source.length });
       this.lastEdit = null;
     } else if (event.key === 'Tab') {
-      // Tab commits a note and keeps the normal keyboard focus order.
+      // Tab commits a token and keeps the normal keyboard focus order.
       this.commit();
     } else if (event.key === 'Escape') {
       this.commit();
@@ -356,10 +393,10 @@ export class NoteEditor {
     }
   }
 
-  openNote(note, caret = note.end) {
+  openToken(token, caret = token.end) {
     this.onEditStart?.();
     this.lastEdit = null;
-    this.activeRange = { start: note.start, end: note.end };
+    this.activeRange = { start: token.start, end: token.end };
     this.render();
     this.restoreSelection({ anchor: caret, focus: caret }, true);
     this.revealCaret();
@@ -378,11 +415,14 @@ export class NoteEditor {
       this.restoreSelection(selection, true);
       return;
     }
-    const chip = event.target.closest('.note-chip');
+    const chip = event.target.closest('.note-chip, .timing-chip');
     this.lastEdit = null;
     if (chip && !event.shiftKey) {
       event.preventDefault();
-      this.openNote(this.score.notes[Number(chip.dataset.noteIndex)]);
+      const token = chip.classList.contains('timing-chip')
+        ? this.score.directives.find(directive => directive.start === Number(chip.dataset.sourceStart))
+        : this.score.notes[Number(chip.dataset.noteIndex)];
+      this.openToken(token);
     }
   }
 

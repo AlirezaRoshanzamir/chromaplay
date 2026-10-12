@@ -60,7 +60,7 @@ export class HarmonicaVisualizer {
     this.resize();
   }
 
-  setScore(notes, { beatsPerBar = 4 } = {}) {
+  setScore(notes, { beatsPerBar = 4, timing = null } = {}) {
     this.notes = Array.isArray(notes) ? notes.map((note) => {
       const startBeat = finite(note.startBeat);
       const duration = Math.max(0, finite(note.beats ?? note.durationBeats, 1));
@@ -80,6 +80,7 @@ export class HarmonicaVisualizer {
       return latestEnd;
     });
     this.beatsPerBar = Math.max(0.125, finite(beatsPerBar, 4));
+    this.timing = timing;
     this.render();
   }
 
@@ -183,8 +184,13 @@ export class HarmonicaVisualizer {
       ctx.lineWidth = 1;
       ctx.stroke();
     }
-    for (let bar = Math.max(0, Math.floor(this.beat / this.beatsPerBar)); bar * this.beatsPerBar <= latest; bar += 1) {
-      const y = yForBeat(bar * this.beatsPerBar);
+    const firstBarBeat = Math.max(0, this.beat);
+    const barLines = this.timing ? this.timing.barsBetween(firstBarBeat, latest) : [];
+    if (!this.timing) {
+      for (let bar = Math.max(0, Math.ceil(this.beat / this.beatsPerBar)); bar * this.beatsPerBar <= latest; bar += 1) barLines.push({ beat: bar * this.beatsPerBar, bar: bar + 1 });
+    }
+    for (const { beat } of barLines) {
+      const y = yForBeat(beat);
       ctx.beginPath();
       ctx.moveTo(left, y + 0.5);
       ctx.lineTo(left + fieldWidth, y + 0.5);
@@ -255,9 +261,9 @@ export class HarmonicaVisualizer {
     ctx.textAlign = 'right';
     ctx.textBaseline = 'middle';
     ctx.fillStyle = COLORS.muted;
-    for (let bar = Math.max(0, Math.floor(this.beat / this.beatsPerBar)); bar * this.beatsPerBar <= latest; bar += 1) {
-      const y = yForBeat(bar * this.beatsPerBar);
-      if (y > top + 5 && y < lineY - 9) ctx.fillText(String(bar + 1).padStart(2, '0'), left - 9, y);
+    for (const { beat, bar } of barLines) {
+      const y = yForBeat(beat);
+      if (y > top + 5 && y < lineY - 9) ctx.fillText(String(bar).padStart(2, '0'), left - 9, y);
     }
     ctx.font = '500 10px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
     ctx.textAlign = 'center';

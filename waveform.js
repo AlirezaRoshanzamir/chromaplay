@@ -138,7 +138,7 @@ function sampledNoteRange(profile, sample, midi, from, to) {
  * Synth notes use the normalized reed oscillator's +/-1 peak and its 0.18 gain.
  * This is an overview at display resolution, not a sample-accurate audio export.
  */
-export function buildNotePeaks({ timeline, notes = [], bpm = 60, instrument = 'synth', instrumentData = null }, columns = MAX_COLUMNS) {
+export function buildNotePeaks({ timeline, notes = [], bpm = 60, timing = timeline?.timing, instrument = 'synth', instrumentData = null }, columns = MAX_COLUMNS) {
   const count = Math.max(1, Math.min(MAX_COLUMNS, Math.floor(finite(columns, MAX_COLUMNS))));
   const mins = new Float32Array(count), maxs = new Float32Array(count);
   const { start, end, duration } = timelineRange(timeline);
@@ -148,8 +148,8 @@ export function buildNotePeaks({ timeline, notes = [], bpm = 60, instrument = 's
   if (!duration || (instrument !== 'synth' && !profile)) return { mins, maxs };
   for (const note of notes) {
     if (note.isRest || !Number.isFinite(note.midi)) continue;
-    const noteStart = offset + finite(note.startBeat) * secondsPerBeat;
-    const noteEnd = offset + finite(note.endBeat) * secondsPerBeat;
+    const noteStart = offset + (timing ? timing.beatToSeconds(finite(note.startBeat)) : finite(note.startBeat) * secondsPerBeat);
+    const noteEnd = offset + (timing ? timing.beatToSeconds(finite(note.endBeat)) : finite(note.endBeat) * secondsPerBeat);
     if (noteEnd <= noteStart || noteEnd <= start || noteStart >= end) continue;
     const first = clamp(Math.floor((noteStart - start) / duration * count), 0, count - 1);
     const last = clamp(Math.ceil((noteEnd - start) / duration * count), first + 1, count);
@@ -174,8 +174,30 @@ function clickEnvelope(time, peak) {
   return 0.001;
 }
 
+/** Constant pulse grids between tempo/meter markers, without expanding every click. */
+function metronomeGrids(timing, bpm, numerator, denominator) {
+  if (!timing) return [{ origin: 0, pulse: 60 / Math.max(1, finite(bpm, 60)) * 4 / Math.max(1, finite(denominator, 4)),
+    meter: clamp(Math.round(finite(numerator, 4)), 1, 32), first: 0, last: Infinity }];
+  const boundaries = [...new Set([...timing.tempoSegments, ...timing.meterSegments].map(segment => segment.beat))].sort((a, b) => a - b);
+  let meterIndex = 0;
+  return boundaries.map((beat, index) => {
+    while (meterIndex + 1 < timing.meterSegments.length && timing.meterSegments[meterIndex + 1].beat <= beat) meterIndex += 1;
+    const meter = timing.meterSegments[meterIndex];
+    const { tempo } = timing.settingsAtBeat(beat);
+    const secondsPerBeat = 60 / tempo;
+    const pulseBeats = 4 / meter.denominator;
+    return {
+      origin: timing.beatToSeconds(beat) + (meter.beat - beat) * secondsPerBeat,
+      pulse: pulseBeats * secondsPerBeat,
+      meter: meter.numerator,
+      first: Math.max(0, Math.ceil((beat - meter.beat) / pulseBeats - 1e-9)),
+      last: index + 1 < boundaries.length ? Math.ceil((boundaries[index + 1] - meter.beat) / pulseBeats - 1e-9) - 1 : Infinity,
+    };
+  });
+}
+
 /** Peak envelope of the engine's 1500/2000 Hz square clicks, including its 0.65 bus gain. */
-export function buildMetronomePeaks({ timeline, bpm = 60, numerator = 4, denominator = 4, metronome = false }, columns = MAX_COLUMNS) {
+export function buildMetronomePeaks({ timeline, bpm = 60, timing = timeline?.timing, numerator = 4, denominator = 4, metronome = false }, columns = MAX_COLUMNS) {
   const count = Math.max(1, Math.min(MAX_COLUMNS, Math.floor(finite(columns, MAX_COLUMNS))));
   const mins = new Float32Array(count), maxs = new Float32Array(count);
   const referencePeak = 0.28 * 0.65;
@@ -183,32 +205,37 @@ export function buildMetronomePeaks({ timeline, bpm = 60, numerator = 4, denomin
   const offset = finite(timeline?.metronomeStartSeconds);
   const end = finite(timeline?.metronomeEndSeconds, offset + finite(timeline?.metronomeDuration));
   if (!metronome || timeline?.hasMetronome === false || !duration || end <= Math.max(0, start, offset)) return { mins, maxs, referencePeak };
-  const pulse = 60 / Math.max(1, finite(bpm, 60)) * 4 / Math.max(1, finite(denominator, 4));
-  const meter = clamp(Math.round(finite(numerator, 4)), 1, 32);
-  const firstScheduled = Math.max(0, Math.ceil(-offset / pulse - 1e-9));
-  for (let bin = 0; bin < count; bin += 1) {
-    const left = Math.max(0, offset, start + bin * duration / count);
-    const right = Math.min(end, start + (bin + 1) * duration / count);
-    if (right <= left) continue;
-    const first = Math.max(firstScheduled, Math.ceil((left - offset - 0.07) / pulse));
-    const last = Math.ceil((right - offset) / pulse) - 1;
-    if (last < first) continue;
-    // Find full attacks arithmetically so even a very long overview does bounded work per pixel.
-    const firstPeak = Math.max(firstScheduled, Math.ceil((left - offset - 0.002) / pulse));
-    const lastPeak = Math.min(last, Math.floor((right - offset - 0.002) / pulse));
-    let amplitude = firstPeak <= lastPeak ? (Math.ceil(firstPeak / meter) * meter <= lastPeak ? 0.28 : 0.20) : 0;
-    // At most two click tails overlap the left edge, plus the right edge's attack.
-    for (const index of new Set([first, first + 1, last])) {
-      if (index > last) continue;
-      const clickStart = offset + index * pulse;
-      const from = Math.max(0, left - clickStart);
-      const to = Math.min(0.07, right - clickStart);
-      if (to <= from) continue;
-      const peak = index % meter === 0 ? 0.28 : 0.20;
-      amplitude = Math.max(amplitude, from <= 0.002 && to >= 0.002 ? peak : Math.max(clickEnvelope(from, peak), clickEnvelope(to, peak)));
+  for (const grid of metronomeGrids(timing, bpm, numerator, denominator)) {
+    const { pulse, meter } = grid;
+    const origin = offset + grid.origin;
+    const firstScheduled = Math.max(grid.first, Math.ceil(-origin / pulse - 1e-9));
+    const lastScheduled = Math.min(grid.last, Math.ceil((end - origin) / pulse - 1e-9) - 1);
+    if (lastScheduled < firstScheduled) continue;
+    const firstBin = clamp(Math.floor((origin + firstScheduled * pulse - start) / duration * count), 0, count - 1);
+    const lastBin = clamp(Math.ceil((Math.min(end, origin + lastScheduled * pulse + 0.07) - start) / duration * count), 0, count);
+    for (let bin = firstBin; bin < lastBin; bin += 1) {
+      const left = Math.max(0, offset, start + bin * duration / count);
+      const right = Math.min(end, start + (bin + 1) * duration / count);
+      if (right <= left) continue;
+      const first = Math.max(firstScheduled, Math.ceil((left - origin - 0.07) / pulse));
+      const last = Math.min(lastScheduled, Math.ceil((right - origin) / pulse) - 1);
+      if (last < first) continue;
+      // Work is bounded by visible pixels and timing changes, even for very long scores.
+      const firstPeak = Math.max(firstScheduled, Math.ceil((left - origin - 0.002) / pulse));
+      const lastPeak = Math.min(last, Math.floor((right - origin - 0.002) / pulse));
+      let amplitude = firstPeak <= lastPeak ? (Math.ceil(firstPeak / meter) * meter <= lastPeak ? 0.28 : 0.20) : 0;
+      for (const index of new Set([first, first + 1, last])) {
+        if (index > last) continue;
+        const clickStart = origin + index * pulse;
+        const from = Math.max(0, left - clickStart);
+        const to = Math.min(0.07, right - clickStart);
+        if (to <= from) continue;
+        const peak = index % meter === 0 ? 0.28 : 0.20;
+        amplitude = Math.max(amplitude, from <= 0.002 && to >= 0.002 ? peak : Math.max(clickEnvelope(from, peak), clickEnvelope(to, peak)));
+      }
+      mins[bin] = Math.min(mins[bin], -amplitude * 0.65);
+      maxs[bin] = Math.max(maxs[bin], amplitude * 0.65);
     }
-    mins[bin] = -amplitude * 0.65;
-    maxs[bin] = amplitude * 0.65;
   }
   return { mins, maxs, referencePeak };
 }

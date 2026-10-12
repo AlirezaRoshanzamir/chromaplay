@@ -1,6 +1,7 @@
 import { isInstrument, loadInstrument, nearestSample } from './instrument.js';
 import { createTimeline } from './timeline.js';
 import { BackgroundPlayer } from './background-player.js';
+import { createScoreTiming } from './score-timing.js';
 
 const LOOKAHEAD_SECONDS = 0.2;
 const SCHEDULER_INTERVAL_MS = 25;
@@ -14,7 +15,7 @@ function clampVolume(value) {
   return Number.isFinite(number) ? Math.min(1, Math.max(0, number)) : 0;
 }
 
-/** Browser-only score and backing-track playback, measured in quarter-note beats. */
+/** Browser-only playback. Transport beats represent seconds at the initial BPM. */
 export class PracticeAudio {
   constructor({ onStateChange, onEnded, onError, backgroundPlayerFactory = options => new BackgroundPlayer(options) } = {}) {
     this.onStateChange = onStateChange;
@@ -143,7 +144,7 @@ export class PracticeAudio {
     this.onError?.(error);
   }
 
-  async play({ notes = [], bpm, fromBeat = 0, noteOffset = 0, backgroundOffset = 0, metronome = this.metronomeEnabled, metronomeOffset = 0, playbackRate = 1 }) {
+  async play({ notes = [], bpm, timing = null, fromBeat = 0, noteOffset = 0, backgroundOffset = 0, metronome = this.metronomeEnabled, metronomeOffset = 0, playbackRate = 1 }) {
     this._cancelPlayback();
     const generation = this._generation;
     this._notes = [...(notes || [])].sort((a, b) => a.startBeat - b.startBeat);
@@ -158,8 +159,10 @@ export class PracticeAudio {
       throw new RangeError('Playback speed must be from 0.25 to 2.');
     }
     this.playbackRate = rate;
+    this._scoreTiming = timing;
+    this._clickTiming = timing || createScoreTiming({ tempo: this._bpm, numerator: this.numerator, denominator: this.denominator });
     this.metronomeEnabled = Boolean(metronome);
-    this._timeline = this.getTimeline({ notes: this._notes, bpm: this._bpm, noteOffset, backgroundOffset, metronomeOffset });
+    this._timeline = this.getTimeline({ notes: this._notes, bpm: this._bpm, timing, noteOffset, backgroundOffset, metronomeOffset });
     this._totalBeats = this._timeline.endBeat;
     this._backgroundOffset = this._timeline.backgroundStartSeconds;
     const requestedBeat = Number.isFinite(Number(fromBeat)) ? Number(fromBeat) : 0;
@@ -170,7 +173,7 @@ export class PracticeAudio {
     }
 
     const context = this._ensureContext();
-    const needsInstrument = this._notes.some(note => !note.isRest && note.endBeat + this._timeline.noteStartBeat > this._position);
+    const needsInstrument = this._notes.some(note => !note.isRest && this._noteTimeBeat(note.endBeat) > this._position);
     const needsBackground = this._backgroundBuffer && this._timeline.backgroundEndSeconds > this._position * 60 / this._bpm;
     // Prime the same media element inside the user's play gesture, including when
     // its audible start is delayed. The helper keeps this priming step silent.
@@ -180,7 +183,7 @@ export class PracticeAudio {
     if (generation !== this._generation) return;
     if (needsBackground && readiness[2] === false) throw new Error('The backing track could not start. Press Play to try again.');
     // Toggling the metronome while sound loads must also update the final bounds.
-    this._timeline = this.getTimeline({ notes: this._notes, bpm: this._bpm, noteOffset, backgroundOffset, metronomeOffset });
+    this._timeline = this.getTimeline({ notes: this._notes, bpm: this._bpm, timing, noteOffset, backgroundOffset, metronomeOffset });
     this._totalBeats = this._timeline.endBeat;
     this._position = Math.min(this._position, this._totalBeats);
     if (this._position >= this._totalBeats) {
@@ -191,7 +194,7 @@ export class PracticeAudio {
     this._startTime = context.currentTime + START_DELAY_SECONDS;
     this._endTime = this._timeAtBeat(this._totalBeats);
     this._metronomeEndTime = this._timeAtBeat(this._timeline.metronomeEndBeat);
-    this._nextNoteIndex = this._notes.findIndex(note => note.endBeat + this._timeline.noteStartBeat > this._startBeat);
+    this._nextNoteIndex = this._notes.findIndex(note => this._noteTimeBeat(note.endBeat) > this._startBeat);
     if (this._nextNoteIndex < 0) this._nextNoteIndex = this._notes.length;
     this._resetClickCursor(this._startBeat);
     this.isPlaying = true;
@@ -320,6 +323,7 @@ export class PracticeAudio {
     if (this.isPlaying) {
       const position = this.getPosition();
       this._timeline = this.getTimeline({ notes: this._notes, bpm: this._bpm,
+        timing: this._scoreTiming,
         noteOffset: this._timeline.noteStartSeconds, backgroundOffset: this._timeline.backgroundStartSeconds,
         metronomeOffset: this._timeline.metronomeStartSeconds });
       this._totalBeats = this._timeline.endBeat;
@@ -340,6 +344,7 @@ export class PracticeAudio {
     }
     this.numerator = top;
     this.denominator = bottom;
+    if (!this._scoreTiming) this._clickTiming = createScoreTiming({ tempo: this._bpm, numerator: top, denominator: bottom });
     this._cancelVoices('click');
     if (this.isPlaying) this._resetClickCursor(this.getPosition() + 0.001);
   }
@@ -356,10 +361,13 @@ export class PracticeAudio {
     return this._startTime + (beat - this._startBeat) * 60 / this._bpm / this.playbackRate;
   }
 
+  _noteTimeBeat(scoreBeat) {
+    const seconds = this._scoreTiming ? this._scoreTiming.beatToSeconds(scoreBeat) : scoreBeat * 60 / this._bpm;
+    return (this._timeline.noteStartSeconds + seconds) * this._bpm / 60;
+  }
+
   _resetClickCursor(position) {
-    const pulse = 4 / this.denominator;
-    const metronomePosition = position - this._timeline.metronomeStartBeat;
-    this._nextClickBeat = Math.ceil(Math.max(0, metronomePosition) / pulse - 1e-9) * pulse;
+    this._nextClickSeconds = Math.max(0, position * 60 / this._bpm - this._timeline.metronomeStartSeconds);
   }
 
   _tick() {
@@ -375,24 +383,25 @@ export class PracticeAudio {
     const horizon = now + LOOKAHEAD_SECONDS;
     while (this._nextNoteIndex < this._notes.length) {
       const note = this._notes[this._nextNoteIndex];
-      const start = this._timeAtBeat(Math.max(note.startBeat + this._timeline.noteStartBeat, this._startBeat));
+      const start = this._timeAtBeat(Math.max(this._noteTimeBeat(note.startBeat), this._startBeat));
       if (start > horizon) break;
       this._nextNoteIndex += 1;
-      const end = this._timeAtBeat(note.endBeat + this._timeline.noteStartBeat);
+      const end = this._timeAtBeat(this._noteTimeBeat(note.endBeat));
       if (!note.isRest && Number.isFinite(note.midi) && end > now + 0.004) {
         this._scheduleNote(note.midi, Math.max(start, now + 0.003), end);
       }
     }
     if (!this.metronomeEnabled || !this._timeline.hasMetronome) return;
-    const pulse = 4 / this.denominator;
-    const metronomeBeats = this._timeline.metronomeDuration * this._bpm / 60;
-    while (this._nextClickBeat < metronomeBeats && this._timeAtBeat(this._timeline.metronomeStartBeat + this._nextClickBeat) <= horizon) {
-      const clickTime = this._timeAtBeat(this._timeline.metronomeStartBeat + this._nextClickBeat);
-      const pulseIndex = Math.round(this._nextClickBeat / pulse);
-      // If the browser throttles timers, skip missed clicks instead of bunching them together.
-      if (clickTime >= now - 0.01) this._scheduleClick(Math.max(clickTime, now + 0.002), pulseIndex % this.numerator === 0);
-      this._nextClickBeat += pulse;
+    const localSeconds = time => this._startBeat * 60 / this._bpm + (time - this._startTime) * this.playbackRate - this._timeline.metronomeStartSeconds;
+    // Only ask for the current lookahead window; throttled tabs skip missed clicks.
+    const from = Math.max(this._nextClickSeconds, localSeconds(now - 0.01));
+    const to = Math.min(this._timeline.metronomeDuration, localSeconds(horizon) + 1e-9);
+    if (to <= from) return;
+    for (const pulse of this._clickTiming.pulsesBetween(from, to)) {
+      const clickTime = this._timeAtBeat((this._timeline.metronomeStartSeconds + pulse.seconds) * this._bpm / 60);
+      if (clickTime >= now - 0.01) this._scheduleClick(Math.max(clickTime, now + 0.002), pulse.accent);
     }
+    this._nextClickSeconds = to;
   }
 
   _trackVoice(source, gain, type) {

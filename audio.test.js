@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { PracticeAudio } from './audio.js';
+import { parseNotation } from './notation.js';
+import { createScoreTiming } from './score-timing.js';
 
 class FakeParameter {
   constructor() { this.events = []; }
@@ -109,6 +111,68 @@ test('pause and resume use the audio clock and replay only the remaining part of
   close(resumedSource.startTime, 0.57);
   close(resumedSource.stops[0], 1.075);
   close(audio.getPosition(), 1);
+});
+
+test('tempo changes schedule note boundaries and preserve source position through seeking and speed changes', async t => {
+  const parsed = parseNotation('TEMPO 120 1h TEMPO 60 2h TSIG 3/8 3h TEMPO 180 4h');
+  const timing = createScoreTiming(parsed);
+  const audio = makeAudio(t);
+  await audio.play({ notes: parsed.notes, bpm: parsed.tempo, timing });
+  close(audio._timeline.scoreDuration, 17 / 3);
+  const first = [...audio._voices].find(voice => voice.type === 'note').source;
+  close(first.stops[0], audio._startTime + 1.005);
+  audio._context.currentTime = audio._startTime + 1.5;
+  close(audio.pause(), 3);
+  await audio.play({ notes: parsed.notes, bpm: parsed.tempo, timing, fromBeat: 3, playbackRate: 2 });
+  const resumed = [...audio._voices].find(voice => voice.type === 'note').source;
+  close(resumed.frequency.events[0].value, 440 * 2 ** ((64 - 69) / 12));
+  close(resumed.stops[0] - resumed.startTime, 0.755);
+  close(audio._endTime - audio._startTime, (17 / 3 - 1.5) / 2);
+  audio._context.currentTime = audio._startTime + 0.25;
+  close(audio.getPosition(), 4);
+});
+
+test('tempo-only markers preserve click phase and time signatures begin a new accented bar', async t => {
+  const parsed = parseNotation('TEMPO 60 TSIG 4/4 1e TEMPO 120 2q TSIG 3/8 3h');
+  const audio = makeAudio(t);
+  const timing = createScoreTiming(parsed);
+  await audio.play({ notes: parsed.notes, bpm: parsed.tempo, timing, metronome: true });
+  for (let seconds = 0; seconds < 2; seconds += 0.05) {
+    audio._context.currentTime = audio._startTime + seconds;
+    audio._tick();
+  }
+  const clicks = audio._context.nodes.filter(node => node.frequency.events[0]?.value >= 1500);
+  assert.equal(clicks.length, 6);
+  [0, 0.75, 1, 1.25, 1.5, 1.75].forEach((seconds, index) => close(clicks[index].startTime, audio._startTime + seconds));
+  assert.deepEqual(clicks.map(node => node.frequency.events[0].value), [2000, 1500, 2000, 1500, 1500, 2000]);
+});
+
+test('variable timing skips negative prefixes and retains the final meter through the backing tail', async t => {
+  const parsed = parseNotation('TEMPO 60 TSIG 4/4 1e TEMPO 120 2q TSIG 3/8 3h');
+  const timing = createScoreTiming(parsed);
+  const audio = makeAudio(t);
+  await addBackground(audio);
+  await audio.play({ notes: parsed.notes, bpm: parsed.tempo, timing, noteOffset: -0.6,
+    backgroundOffset: -2, metronome: true, metronomeOffset: -0.6, playbackRate: 2 });
+  close(audio.getPosition(), 0);
+  const clicks = [...audio._voices].filter(voice => voice.type === 'click');
+  close(clicks[0].source.startTime, audio._startTime + 0.075);
+  assert.equal(clicks[0].source.frequency.events[0].value, 1500);
+  close(audio._backgroundPlayer.current.offset, 2);
+  close(audio._endTime - audio._startTime, 59.4 / 2);
+  await audio.play({ notes: parsed.notes, bpm: parsed.tempo, timing, fromBeat: 10,
+    backgroundOffset: -2, metronome: true, metronomeOffset: -0.6, playbackRate: 2 });
+  assert.equal([...audio._voices].some(voice => voice.type === 'note'), false);
+  const tail = [...audio._voices].filter(voice => voice.type === 'click');
+  close(tail[0].source.startTime, audio._startTime + 0.075);
+  assert.equal(tail[0].source.frequency.events[0].value, 2000);
+  const start = audio._startTime;
+  audio.setMetronome(false);
+  close(audio._startTime, start);
+  close(audio._timeline.endSeconds, 58);
+  audio.setMetronome(true);
+  assert.equal(audio._timeline.timing, timing);
+  close(audio._timeline.endSeconds, 59.4);
 });
 
 test('a positive backing offset delays its start and a negative offset seeks into its buffer', async t => {

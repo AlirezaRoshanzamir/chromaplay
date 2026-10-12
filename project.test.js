@@ -476,3 +476,22 @@ test('explicit playback speed is validated in every supported project version', 
     }
   }
 });
+
+test('inline timing changes round-trip as source text while project fields describe only initial settings', () => {
+  const notation = 'TEMPO 80 TSIG 3/4\r\n1h 1q L TEMPO 120 2q TSIG 6/8 -3#q.';
+  const project = validateProject({ ...DEFAULT_PROJECT, notation, playbackRate: 0.75 });
+  assert.deepEqual([project.tempo, project.numerator, project.denominator], [80, 3, 4]);
+  const imported = parseProjectFile(serializeProject(project), 'changes.chroma');
+  assert.equal(imported.notation, notation);
+  assert.deepEqual(imported, project);
+  const text = parseProjectFile('1q TEMPO 90 TSIG 6/8 2q.', 'changes.txt');
+  assert.deepEqual([text.tempo, text.numerator, text.denominator], [60, 4, 4]);
+  assert.equal(text.notation, '1q TEMPO 90 TSIG 6/8 2q.');
+});
+
+test('legacy initial settings do not overwrite or borrow from later timing changes', () => {
+  const notation = '1q TEMPO 120 TSIG 6/8 2q.';
+  const project = validateProject({ version: 1, notation, tempo: 75, numerator: 3, denominator: 4 });
+  assert.equal(project.notation, `TEMPO 75\nTSIG 3/4\n${notation}`);
+  assert.deepEqual([project.tempo, project.numerator, project.denominator], [75, 3, 4]);
+});

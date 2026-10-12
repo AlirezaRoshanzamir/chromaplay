@@ -4,12 +4,12 @@ function secondsOffset(value) {
 }
 
 /** Describe independently shifted clips on a clock that begins at zero. */
-export function createTimeline({ notes = [], bpm = 100, noteOffset = 0, backgroundOffset = 0, backgroundDuration = 0, metronome = false, metronomeOffset = 0 } = {}) {
+export function createTimeline({ notes = [], bpm = 100, timing = null, noteOffset = 0, backgroundOffset = 0, backgroundDuration = 0, metronome = false, metronomeOffset = 0 } = {}) {
   const tempo = Number(bpm);
   if (!Number.isFinite(tempo) || tempo <= 0) throw new Error('Tempo must be greater than zero.');
   const scoreBeats = notes.reduce((end, note) => Math.max(end, Number(note.endBeat) || 0), 0);
   const secondsPerBeat = 60 / tempo;
-  const scoreDuration = scoreBeats * secondsPerBeat;
+  const scoreDuration = timing ? timing.beatToSeconds(scoreBeats) : scoreBeats * secondsPerBeat;
   const trackDuration = Number.isFinite(Number(backgroundDuration)) ? Math.max(0, Number(backgroundDuration)) : 0;
   const hasNotes = scoreDuration > 0;
   const hasBackground = trackDuration > 0;
@@ -29,6 +29,7 @@ export function createTimeline({ notes = [], bpm = 100, noteOffset = 0, backgrou
   const endSeconds = Math.max(0, ...ends);
   const durationSeconds = endSeconds - startSeconds;
   return {
+    timing,
     startSeconds,
     endSeconds,
     durationSeconds,

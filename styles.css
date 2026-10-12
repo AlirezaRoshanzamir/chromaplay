@@ -44,6 +44,9 @@ main{max-width:1440px;margin:auto;padding:39px max(5vw,24px) 0}.page-heading{dis
 .note-chip.active { box-shadow: inset 0 0 0 1px var(--note-fg); }
 .note-chip.rest { border-style: dashed; }
 .note-chip.compact { padding: 0; font-size: 9px; letter-spacing: -.3px; }
+.timing-chip { display: inline-block; box-sizing: border-box; height: 26px; padding: 0 7px; margin: 2px 0; border: 1px solid #b7c7cd; border-radius: 6px; background: #e4edf0; color: #3c5963; font: 500 10px/24px 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; vertical-align: middle; white-space: nowrap; cursor: text; }
+.timing-chip.time-signature { border-color: #c9bfd3; background: #eee8f3; color: #625372; }
+.timing-chip:hover { box-shadow: inset 0 0 0 1px currentColor; }
 .chip-label { display: inline-block; position: sticky; left: 8px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; vertical-align: top; }
 .note-raw { white-space: pre-wrap; }
 .note-error { text-decoration: underline wavy #be6c54; text-underline-offset: 4px; }

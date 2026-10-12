@@ -1,6 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { buildAudioPeaks, alignAudioPeaks, buildNotePeaks, buildMetronomePeaks, clampViewport, timeToRatio, ratioToTime, formatTimelineTime, WaveformTimeline } from './waveform.js';
+import { parseNotation } from './notation.js';
+import { createScoreTiming } from './score-timing.js';
+import { createTimeline } from './timeline.js';
 
 function audioBuffer(channels, sampleRate = 1000) {
   return {
@@ -47,6 +50,47 @@ test('note peaks follow tempo and independent note offset while rests remain sil
   [0, 0.18, 0, 0.18, 0, 0].forEach((expected, index) => close(peaks.maxs[index], expected));
   const shifted = buildNotePeaks({ timeline: { ...timeline, noteStartSeconds: 1 }, notes: [note(0, 2)], bpm: 120 }, 6);
   [0, 0, 0, 0.18, 0, 0].forEach((expected, index) => close(shifted.maxs[index], expected));
+});
+
+test('note waveforms place variable-tempo notes and rests on the same shifted seconds axis', () => {
+  const parsed = parseNotation('TEMPO 120 1h TEMPO 60 0h 2h TEMPO 120 3h');
+  const timing = createScoreTiming(parsed);
+  const timeline = createTimeline({ notes: parsed.notes, bpm: parsed.tempo, timing, noteOffset: 1 });
+  assert.equal(timeline.endSeconds, 7);
+  const peaks = buildNotePeaks({ timeline, notes: parsed.notes, bpm: parsed.tempo }, 7);
+  [0, 0.18, 0, 0, 0.18, 0.18, 0.18].forEach((expected, index) => close(peaks.maxs[index], expected));
+  const cropped = buildNotePeaks({ timeline: { ...timeline, startSeconds: 2, endSeconds: 5 }, notes: parsed.notes, bpm: parsed.tempo }, 3);
+  [0, 0, 0.18].forEach((expected, index) => close(cropped.maxs[index], expected));
+});
+
+test('metronome waveform follows changing tempo and meter without inventing clicks at tempo markers', () => {
+  const parsed = parseNotation('TEMPO 60 TSIG 4/4 1e TEMPO 120 2q TSIG 3/8 3h');
+  const timing = createScoreTiming(parsed);
+  const timeline = createTimeline({ notes: parsed.notes, bpm: parsed.tempo, timing, metronome: true });
+  const peaks = buildMetronomePeaks({ timeline, bpm: parsed.tempo, metronome: true }, 1000);
+  const peakAt = seconds => Math.max(...peaks.maxs.slice(Math.floor(seconds / 2 * 1000), Math.floor(seconds / 2 * 1000) + 3));
+  close(peakAt(0), 0.28 * 0.65);
+  close(peakAt(0.5), 0);
+  close(peakAt(0.75), 0.20 * 0.65);
+  close(peakAt(1), 0.28 * 0.65);
+  close(peakAt(1.25), 0.20 * 0.65);
+  close(peakAt(1.5), 0.20 * 0.65);
+  close(peakAt(1.75), 0.28 * 0.65);
+  const shifted = buildMetronomePeaks({ timeline: { ...timeline, metronomeStartSeconds: -0.6, metronomeEndSeconds: 1.4 }, metronome: true }, 1000);
+  close(Math.max(...shifted.maxs.slice(0, 50)), 0);
+  close(Math.max(...shifted.maxs.slice(75, 80)), 0.20 * 0.65);
+});
+
+test('variable timing click previews bound work by display columns even across a long backing tail', () => {
+  const parsed = parseNotation('TEMPO 60 1q TEMPO 300 TSIG 3/16 2q');
+  const timing = createScoreTiming(parsed);
+  timing.pulsesBetween = () => { throw new Error('An overview must not enumerate millions of clicks.'); };
+  const timeline = createTimeline({ notes: parsed.notes, bpm: parsed.tempo, timing, backgroundDuration: 100000, metronome: true });
+  const peaks = buildMetronomePeaks({ timeline, metronome: true }, 20000);
+  assert.equal(peaks.maxs.length, 1500);
+  assert.ok(peaks.maxs.every(value => value > 0));
+  const zoomed = buildMetronomePeaks({ timeline: { ...timeline, startSeconds: 99999, endSeconds: 100000 }, metronome: true }, 1000);
+  assert.ok(zoomed.maxs.some(value => value > 0));
 });
 
 test('sampled note preview uses PCM amplitude, pitch-dependent sample position and sustain loops', () => {
