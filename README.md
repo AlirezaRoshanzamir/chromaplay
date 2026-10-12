@@ -45,6 +45,7 @@ Use **Hide** on a panel to collapse its contents while keeping its heading visib
 ### Arrange the panels
 
 Use the layout controls above the panels to choose **1 column** or **2 columns**, and a centered width or **Full width**.
+Choosing **1 column** sets **Centered** width and choosing **2 columns** sets **Full width**; you can change **Width** afterward, and it stays saved until you choose a different column mode.
 
 Drag a bottom handle to change the height. In one column, each panel has its own height. In two columns, both panels in a row share the same height, and dragging the divider between the columns changes their widths together.
 

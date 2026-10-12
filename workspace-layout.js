@@ -32,13 +32,14 @@ export function effectiveColumns(preferredColumns, width) {
 
 export function normalizeLayoutSettings(value, panelIds = DEFAULT_PANEL_IDS) {
   const input = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+  const columns = input.columns === 2 ? 2 : 1;
   const heights = (record, keys) => Object.fromEntries(keys.flatMap(key => (
     record && typeof record === 'object' && own(record, key) && finiteNumber(record[key]) && record[key] > 0
       ? [[key, clampPanelHeight(record[key])]] : []
   )));
   return {
-    columns: input.columns === 2 ? 2 : 1,
-    width: input.width === 'full' ? 'full' : 'centered',
+    columns,
+    width: ['full', 'centered'].includes(input.width) ? input.width : columns === 2 ? 'full' : 'centered',
     split: clampColumnRatio(input.split),
     panelHeights: heights(input.panelHeights, panelIds),
     rowHeights: heights(input.rowHeights, groupPanels(panelIds, 2).map(rowKey)),
@@ -137,7 +138,9 @@ export class WorkspaceLayout {
 
   _setPreference(key, value) {
     this._finishDrag(false);
-    this.settings = normalizeLayoutSettings({ ...this.settings, [key]: value }, this.panelIds);
+    const settings = { ...this.settings, [key]: value };
+    if (key === 'columns') settings.width = value === 2 ? 'full' : 'centered';
+    this.settings = normalizeLayoutSettings(settings, this.panelIds);
     this._save();
     this._render();
   }
