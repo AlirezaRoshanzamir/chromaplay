@@ -11,12 +11,14 @@ test('the default warm-up has 32 quarter beats and the requested settings', () =
   assert.equal(DEFAULT_PROJECT.numerator, 4);
   assert.equal(DEFAULT_PROJECT.denominator, 4);
   assert.equal(DEFAULT_PROJECT.instrument, 'fluid');
-  assert.equal(DEFAULT_PROJECT.version, 3);
+  assert.equal(DEFAULT_PROJECT.version, 4);
   assert.ok(DEFAULT_PROJECT.notation.startsWith('TEMPO 90\nTSIG 4/4\n'));
   assert.equal(DEFAULT_PROJECT.backgroundOffset, 0);
+  assert.equal(DEFAULT_PROJECT.metronomeOffset, 0);
   assert.equal(DEFAULT_PROJECT.noteOffset, 0);
   assert.equal(DEFAULT_PROJECT.noteVolume, 70);
   assert.equal(DEFAULT_PROJECT.backgroundVolume, 65);
+  assert.equal(DEFAULT_PROJECT.metronomeVolume, 70);
   assert.equal(DEFAULT_PROJECT.noteMuted, false);
   assert.equal(DEFAULT_PROJECT.backgroundMuted, false);
   assert.equal(DEFAULT_PROJECT.metronome, false);
@@ -34,8 +36,10 @@ test('JSON and .chroma round trips retain settings but never background audio', 
     instrument: 'vcsl',
     noteOffset: 1.375,
     backgroundOffset: -2.125,
+    metronomeOffset: -0.625,
     noteVolume: 12,
     backgroundVolume: 81,
+    metronomeVolume: 45,
     noteMuted: false,
     backgroundMuted: false,
     metronome: true,
@@ -78,7 +82,7 @@ test('malformed files, unsupported versions, and foreign formats fail clearly', 
   for (const input of [null, [], 1, '1q', {}]) {
     assert.throws(() => parseProjectFile(JSON.stringify(input), 'bad.json'));
   }
-  for (const version of [0, 4, '1', null]) {
+  for (const version of [0, 5, '1', null]) {
     assert.throws(() => validateProject({ ...DEFAULT_PROJECT, version }), /version/);
   }
   assert.throws(() => validateProject({ ...DEFAULT_PROJECT, format: 'other-app' }), /not a ChromaPlay/);
@@ -102,8 +106,10 @@ test('numeric settings reject nonnumeric, nonfinite, out-of-range, and fractiona
   const invalid = {
     noteOffset: [-601, 601, '0', null, NaN, Infinity, -Infinity],
     backgroundOffset: [-601, 601, '0', null, NaN, Infinity, -Infinity],
+    metronomeOffset: [-601, 601, '0', null, NaN, Infinity, -Infinity],
     noteVolume: [-1, 101, '70', NaN],
     backgroundVolume: [-1, 101, '65', Infinity],
+    metronomeVolume: [-1, 101, '70', null, NaN, Infinity, -Infinity],
   };
   for (const [field, values] of Object.entries(invalid)) {
     for (const value of values) {
@@ -205,7 +211,7 @@ test('version 1 and unversioned settings migrate into headers without changing n
     const oldProject = { notation, tempo: 123, numerator: 6, denominator: 8 };
     if (version !== undefined) oldProject.version = version;
     const migrated = validateProject(oldProject);
-    assert.equal(migrated.version, 3);
+    assert.equal(migrated.version, 4);
     assert.equal(migrated.notation, `TEMPO 123\nTSIG 6/8\n${notation}`);
     assert.equal(migrated.tempo, 123);
     assert.equal(migrated.numerator, 6);
@@ -293,7 +299,7 @@ test('version 2 projects keep their notation, sound, volumes, and track delay wh
       backgroundOffset: -2.25,
     };
     const restored = parseProjectFile(JSON.stringify(oldProject), 'version-2.chroma');
-    assert.equal(restored.version, 3);
+    assert.equal(restored.version, 4);
     assert.equal(restored.notation, notation);
     assert.equal(restored.tempo, 60);
     assert.equal(restored.numerator, 4);
@@ -303,17 +309,17 @@ test('version 2 projects keep their notation, sound, volumes, and track delay wh
     assert.equal(restored.backgroundVolume, 47);
     assert.equal(restored.backgroundOffset, -2.25);
     assert.equal(restored.noteOffset, 0);
-    assert.deepEqual(parseProjectFile(serializeProject(restored), 'version-3.chroma'), restored);
+    assert.deepEqual(parseProjectFile(serializeProject(restored), 'version-4.chroma'), restored);
   }
 });
 
-test('version 2 and 3 drafts retain text exactly without reinserting removed headers', () => {
-  for (const version of [2, 3]) {
+test('version 2, 3, and 4 drafts retain text exactly without reinserting removed headers', () => {
+  for (const version of [2, 3, 4]) {
     for (const notation of ['1q', 'TEMPO \nTSIG 6/\n1q -3#', 'TEMP 75\r\nTSIG 3/8\r\n1q']) {
       const restored = validateProject({
         ...DEFAULT_PROJECT, version, notation, tempo: 120, numerator: 6, denominator: 8, noteOffset: -1.5,
       }, { allowInvalidNotation: true });
-      assert.equal(restored.version, 3);
+      assert.equal(restored.version, 4);
       assert.equal(restored.notation, notation);
       assert.equal(restored.noteOffset, -1.5);
       assert.deepEqual(validateProject(restored, { allowInvalidNotation: true }), restored);
@@ -321,12 +327,12 @@ test('version 2 and 3 drafts retain text exactly without reinserting removed hea
   }
 });
 
-test('both start delays round-trip independently, including negative, fractional, and limit values', () => {
+test('note and track delays round-trip independently, including negative, fractional, and limit values', () => {
   for (const noteOffset of [-600, -2.125, 0, 1.375, 600]) {
     for (const backgroundOffset of [-600, -3.25, 0, 4.875, 600]) {
       const project = { ...DEFAULT_PROJECT, noteOffset, backgroundOffset };
       const exported = serializeProject(project);
-      assert.equal(JSON.parse(exported).version, 3);
+      assert.equal(JSON.parse(exported).version, 4);
       assert.deepEqual(parseProjectFile(exported, 'delays.chroma'), project);
     }
   }
@@ -354,4 +360,66 @@ test('empty scores can retain track-only settings without exporting the uploaded
   assert.equal(project.tempo, 60);
   assert.ok(!exported.includes('local-track'));
   assert.ok(!exported.includes('waveform'));
+});
+
+test('legacy metronome settings follow the old notes once, including zero volume and muted notes', () => {
+  for (const version of [undefined, 1, 2, 3]) {
+    for (const [noteVolume, noteMuted, expectedVolume] of [[0, false, 0], [42, false, 42], [70, true, 0]]) {
+      const oldProject = {
+        notation: 'TEMPO 75\nTSIG 3/4\n1q -2h', instrument: 'vcsl',
+        noteOffset: -2.125, noteVolume, noteMuted, metronome: true,
+        backgroundOffset: 4.75, backgroundVolume: 18,
+      };
+      if (version !== undefined) oldProject.version = version;
+      const restored = parseProjectFile(JSON.stringify(oldProject), 'legacy.chroma');
+      assert.equal(restored.version, 4);
+      assert.equal(restored.metronomeOffset, -2.125);
+      assert.equal(restored.metronomeVolume, expectedVolume);
+      assert.equal(restored.metronome, true);
+      assert.equal(restored.instrument, 'vcsl');
+      assert.equal(restored.backgroundOffset, 4.75);
+      assert.equal(restored.backgroundVolume, 18);
+      assert.equal(restored.notation, oldProject.notation);
+      const edited = { ...restored, noteOffset: 3, noteVolume: 100 };
+      assert.deepEqual(parseProjectFile(serializeProject(edited), 'independent.chroma'), edited);
+    }
+  }
+});
+
+test('current scores default missing metronome settings independently of notes', () => {
+  const restored = validateProject({ version: 4, notation: '1q', noteOffset: -3, noteVolume: 0 });
+  assert.equal(restored.metronomeOffset, 0);
+  assert.equal(restored.metronomeVolume, 70);
+  const imported = parseProjectFile('1q', 'notes.txt');
+  assert.equal(imported.metronomeOffset, 0);
+  assert.equal(imported.metronomeVolume, 70);
+  const defaults = validateProject({ version: 3, notation: '1q' });
+  assert.equal(defaults.metronomeOffset, 0);
+  assert.equal(defaults.metronomeVolume, 70);
+});
+
+test('explicit metronome settings are preserved and validated even in older files', () => {
+  for (const version of [1, 2, 3, 4]) {
+    const source = {
+      version, notation: '1q', metronomeOffset: 0, metronomeVolume: 0,
+      noteOffset: 12, noteVolume: 89,
+    };
+    const restored = validateProject(source);
+    assert.equal(restored.metronomeOffset, 0);
+    assert.equal(restored.metronomeVolume, 0);
+    assert.throws(() => validateProject({ ...source, metronomeOffset: 601 }), /Metronome start delay/);
+    assert.throws(() => validateProject({ ...source, metronomeVolume: 101 }), /Metronome volume/);
+  }
+});
+
+test('metronome volume and delay round-trip at fractional values and both limits without clamping', () => {
+  for (const metronomeOffset of [-600, -1.25, 0, 2.875, 600]) {
+    for (const metronomeVolume of [0, 32.5, 100]) {
+      const project = { ...DEFAULT_PROJECT, metronome: true, metronomeOffset, metronomeVolume };
+      assert.deepEqual(parseProjectFile(serializeProject(project), 'metronome.chroma'), project);
+    }
+  }
+  const draft = { ...DEFAULT_PROJECT, notation: 'TEMPO \n1q', metronomeVolume: 0, metronomeOffset: -0.5 };
+  assert.equal(validateProject(draft, { allowInvalidNotation: true }).metronomeVolume, 0);
+  assert.throws(() => validateProject({ ...draft, metronomeOffset: -600.01 }, { allowInvalidNotation: true }), /Metronome start delay/);
 });

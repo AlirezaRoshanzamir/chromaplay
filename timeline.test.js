@@ -10,10 +10,10 @@ test('both clips determine the timeline, preserving independent offsets in secon
   assert.equal(timeline.noteEndSeconds, 6);
   assert.equal(timeline.backgroundStartSeconds, -3);
   assert.equal(timeline.backgroundEndSeconds, 7);
-  assert.equal(timeline.startSeconds, -3);
+  assert.equal(timeline.startSeconds, 0);
   assert.equal(timeline.endSeconds, 7);
-  assert.equal(timeline.durationSeconds, 10);
-  assert.equal(timeline.startBeat, -6);
+  assert.equal(timeline.durationSeconds, 7);
+  assert.equal(timeline.startBeat, 0);
   assert.equal(timeline.endBeat, 14);
   assert.equal(timeline.noteStartBeat, 4);
   assert.equal(timeline.noteEndBeat, 12);
@@ -26,13 +26,13 @@ test('the longer clip supplies the ending and initial positive delays remain on 
   assert.equal(timeline.durationSeconds, 12);
 });
 
-test('a timeline can finish before zero when all clips do', () => {
+test('clips entirely before zero produce an empty playable range', () => {
   const timeline = createTimeline({ notes, bpm: 120, noteOffset: -10, backgroundOffset: -8, backgroundDuration: 1 });
-  assert.equal(timeline.startSeconds, -10);
-  assert.equal(timeline.endSeconds, -6);
-  assert.equal(timeline.durationSeconds, 4);
-  assert.equal(timeline.startBeat, -20);
-  assert.equal(timeline.endBeat, -12);
+  assert.equal(timeline.startSeconds, 0);
+  assert.equal(timeline.endSeconds, 0);
+  assert.equal(timeline.durationSeconds, 0);
+  assert.equal(timeline.startBeat, 0);
+  assert.equal(timeline.endBeat, 0);
 });
 
 test('a backing track alone is playable and offsets on absent clips do not extend it', () => {
@@ -66,4 +66,29 @@ test('empty timelines stay at zero and invalid tempo is rejected', () => {
   assert.equal(empty.hasNotes, false);
   assert.equal(empty.hasBackground, false);
   assert.throws(() => createTimeline({ bpm: 0 }), /Tempo/);
+});
+
+test('enabled metronome uses the longer source duration and its independent offset can extend playback', () => {
+  const timeline = createTimeline({ notes, bpm: 120, noteOffset: -1, backgroundOffset: 2, backgroundDuration: 10, metronome: true, metronomeOffset: 4 });
+  assert.equal(timeline.hasMetronome, true);
+  assert.equal(timeline.metronomeDuration, 10);
+  assert.equal(timeline.metronomeStartSeconds, 4);
+  assert.equal(timeline.metronomeEndSeconds, 14);
+  assert.equal(timeline.metronomeStartBeat, 8);
+  assert.equal(timeline.metronomeEndBeat, 28);
+  assert.equal(timeline.endSeconds, 14);
+  const disabled = createTimeline({ notes, bpm: 120, metronome: false, metronomeOffset: 100 });
+  assert.equal(disabled.hasMetronome, false);
+  assert.equal(disabled.endSeconds, 4);
+});
+
+test('negative metronome offsets retain their grid origin while playback starts at zero', () => {
+  const timeline = createTimeline({ notes: [], bpm: 120, backgroundOffset: -3, backgroundDuration: 10, metronome: true, metronomeOffset: -1 });
+  assert.equal(timeline.metronomeStartBeat, -2);
+  assert.equal(timeline.metronomeEndBeat, 18);
+  assert.equal(timeline.startSeconds, 0);
+  assert.equal(timeline.endSeconds, 9);
+  const empty = createTimeline({ metronome: true, metronomeOffset: 10 });
+  assert.equal(empty.hasMetronome, false);
+  assert.equal(empty.durationSeconds, 0);
 });
