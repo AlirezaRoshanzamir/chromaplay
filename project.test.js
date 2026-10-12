@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { DEFAULT_PROJECT, parseProjectFile, serializeProject, validateProject } from './project.js';
+import { DEFAULT_PROJECT, MAX_MUSICXML_LENGTH, parseProjectFile, serializeProject, validateProject } from './project.js';
 import { parseNotation } from './notation.js';
+import { dslToMusicXml, musicXmlToDsl } from './musicxml.js';
 
 test('the default warm-up has 32 quarter beats and the requested settings', () => {
   assert.equal(DEFAULT_PROJECT.title, 'Morning warm-up');
@@ -12,7 +13,9 @@ test('the default warm-up has 32 quarter beats and the requested settings', () =
   assert.equal(DEFAULT_PROJECT.denominator, 4);
   assert.equal(DEFAULT_PROJECT.instrument, 'fluid');
   assert.equal(DEFAULT_PROJECT.playbackRate, 1);
-  assert.equal(DEFAULT_PROJECT.version, 5);
+  assert.equal(DEFAULT_PROJECT.version, 6);
+  assert.equal(DEFAULT_PROJECT.scoreFormat, 'dsl');
+  assert.equal(DEFAULT_PROJECT.musicxml, '');
   assert.ok(DEFAULT_PROJECT.notation.startsWith('TEMPO 90\nTSIG 4/4\n'));
   assert.equal(DEFAULT_PROJECT.backgroundOffset, 0);
   assert.equal(DEFAULT_PROJECT.metronomeOffset, 0);
@@ -84,7 +87,7 @@ test('malformed files, unsupported versions, and foreign formats fail clearly', 
   for (const input of [null, [], 1, '1q', {}]) {
     assert.throws(() => parseProjectFile(JSON.stringify(input), 'bad.json'));
   }
-  for (const version of [0, 6, '1', null]) {
+  for (const version of [0, 7, '1', null]) {
     assert.throws(() => validateProject({ ...DEFAULT_PROJECT, version }), /version/);
   }
   assert.throws(() => validateProject({ ...DEFAULT_PROJECT, format: 'other-app' }), /not a ChromaPlay/);
@@ -214,7 +217,7 @@ test('version 1 and unversioned settings migrate into headers without changing n
     const oldProject = { notation, tempo: 123, numerator: 6, denominator: 8 };
     if (version !== undefined) oldProject.version = version;
     const migrated = validateProject(oldProject);
-    assert.equal(migrated.version, 5);
+    assert.equal(migrated.version, 6);
     assert.equal(migrated.notation, `TEMPO 123\nTSIG 6/8\n${notation}`);
     assert.equal(migrated.tempo, 123);
     assert.equal(migrated.numerator, 6);
@@ -302,7 +305,7 @@ test('version 2 projects keep their notation, sound, volumes, and track delay wh
       backgroundOffset: -2.25,
     };
     const restored = parseProjectFile(JSON.stringify(oldProject), 'version-2.chroma');
-    assert.equal(restored.version, 5);
+    assert.equal(restored.version, 6);
     assert.equal(restored.notation, notation);
     assert.equal(restored.tempo, 60);
     assert.equal(restored.numerator, 4);
@@ -312,17 +315,17 @@ test('version 2 projects keep their notation, sound, volumes, and track delay wh
     assert.equal(restored.backgroundVolume, 47);
     assert.equal(restored.backgroundOffset, -2.25);
     assert.equal(restored.noteOffset, 0);
-    assert.deepEqual(parseProjectFile(serializeProject(restored), 'version-5.chroma'), restored);
+    assert.deepEqual(parseProjectFile(serializeProject(restored), 'version-6.chroma'), restored);
   }
 });
 
-test('version 2 through 5 drafts retain text exactly without reinserting removed headers', () => {
-  for (const version of [2, 3, 4, 5]) {
+test('version 2 through 6 drafts retain text exactly without reinserting removed headers', () => {
+  for (const version of [2, 3, 4, 5, 6]) {
     for (const notation of ['1q', 'TEMPO \nTSIG 6/\n1q -3#', 'TEMP 75\r\nTSIG 3/8\r\n1q']) {
       const restored = validateProject({
         ...DEFAULT_PROJECT, version, notation, tempo: 120, numerator: 6, denominator: 8, noteOffset: -1.5,
       }, { allowInvalidNotation: true });
-      assert.equal(restored.version, 5);
+      assert.equal(restored.version, 6);
       assert.equal(restored.notation, notation);
       assert.equal(restored.noteOffset, -1.5);
       assert.deepEqual(validateProject(restored, { allowInvalidNotation: true }), restored);
@@ -335,7 +338,7 @@ test('note and track delays round-trip independently, including negative, fracti
     for (const backgroundOffset of [-600, -3.25, 0, 4.875, 600]) {
       const project = { ...DEFAULT_PROJECT, noteOffset, backgroundOffset };
       const exported = serializeProject(project);
-      assert.equal(JSON.parse(exported).version, 5);
+      assert.equal(JSON.parse(exported).version, 6);
       assert.deepEqual(parseProjectFile(exported, 'delays.chroma'), project);
     }
   }
@@ -375,7 +378,7 @@ test('legacy metronome settings follow the old notes once, including zero volume
       };
       if (version !== undefined) oldProject.version = version;
       const restored = parseProjectFile(JSON.stringify(oldProject), 'legacy.chroma');
-      assert.equal(restored.version, 5);
+      assert.equal(restored.version, 6);
       assert.equal(restored.metronomeOffset, -2.125);
       assert.equal(restored.metronomeVolume, expectedVolume);
       assert.equal(restored.metronome, true);
@@ -390,7 +393,7 @@ test('legacy metronome settings follow the old notes once, including zero volume
 });
 
 test('current scores default missing metronome settings independently of notes', () => {
-  for (const version of [4, 5]) {
+  for (const version of [4, 5, 6]) {
     const restored = validateProject({ version, notation: '1q', noteOffset: -3, noteVolume: 0 });
     assert.equal(restored.metronomeOffset, 0);
     assert.equal(restored.metronomeVolume, 70);
@@ -405,7 +408,7 @@ test('current scores default missing metronome settings independently of notes',
 });
 
 test('explicit metronome settings are preserved and validated even in older files', () => {
-  for (const version of [1, 2, 3, 4, 5]) {
+  for (const version of [1, 2, 3, 4, 5, 6]) {
     const source = {
       version, notation: '1q', metronomeOffset: 0, metronomeVolume: 0,
       noteOffset: 12, noteVolume: 89,
@@ -439,7 +442,7 @@ test('older projects default to normal playback speed without changing their tim
     };
     if (version !== undefined) source.version = version;
     const restored = parseProjectFile(JSON.stringify(source), 'older.chroma');
-    assert.equal(restored.version, 5);
+    assert.equal(restored.version, 6);
     assert.equal(restored.playbackRate, 1);
     for (const key of Object.keys(source).filter(key => key !== 'version')) {
       assert.equal(restored[key], source[key], key);
@@ -460,7 +463,7 @@ test('playback speed round-trips independently of score tempo, source delays, an
       noteVolume: 0, backgroundVolume: 80, metronomeVolume: 30,
     };
     const exported = serializeProject(project);
-    assert.equal(JSON.parse(exported).version, 5);
+    assert.equal(JSON.parse(exported).version, 6);
     assert.deepEqual(parseProjectFile(exported, 'speed.chroma'), project);
     const draft = { ...project, notation: 'TEMPO 120\nTSIG 3/4\n-3#' };
     assert.deepEqual(validateProject(draft, { allowInvalidNotation: true }), draft);
@@ -468,7 +471,7 @@ test('playback speed round-trips independently of score tempo, source delays, an
 });
 
 test('explicit playback speed is validated in every supported project version', () => {
-  for (const version of [1, 2, 3, 4, 5]) {
+  for (const version of [1, 2, 3, 4, 5, 6]) {
     assert.equal(validateProject({ version, notation: '1q', playbackRate: 0.4 }).playbackRate, 0.4);
     for (const playbackRate of [0, 2.01, '0.5', null, NaN, Infinity]) {
       assert.throws(() => validateProject({ version, notation: '1q', playbackRate }), /Playback speed/);
@@ -494,4 +497,116 @@ test('legacy initial settings do not overwrite or borrow from later timing chang
   const project = validateProject({ version: 1, notation, tempo: 75, numerator: 3, denominator: 4 });
   assert.equal(project.notation, `TEMPO 75\nTSIG 3/4\n${notation}`);
   assert.deepEqual([project.tempo, project.numerator, project.denominator], [75, 3, 4]);
+});
+
+const MUSICXML_SCORE = `<?xml version="1.0" encoding="UTF-8"?>
+<score-partwise version="4.0">
+  <part-list><score-part id="P1"><part-name>Harmonica</part-name></score-part></part-list>
+  <part id="P1"><measure number="1">
+    <attributes><divisions>4</divisions><time><beats>3</beats><beat-type>4</beat-type></time></attributes>
+    <direction><sound tempo="72"/></direction>
+    <note><pitch><step>C</step><octave>4</octave></pitch><duration>4</duration><type>quarter</type></note>
+    <note><rest/><duration>2</duration><type>eighth</type></note>
+  </measure></part>
+</score-partwise>
+`;
+
+test('MusicXML-main projects preserve the exact source and derive playback from it', () => {
+  const musicxml = MUSICXML_SCORE.replaceAll('\n', '\r\n');
+  const source = {
+    ...DEFAULT_PROJECT, title: 'XML practice', scoreFormat: 'musicxml', musicxml,
+    notation: '12w', tempo: 250, numerator: 7, denominator: 16,
+    playbackRate: 0.75, noteOffset: -1.25, backgroundVolume: 37, metronome: true,
+  };
+  const project = validateProject(source);
+  assert.equal(project.musicxml, musicxml);
+  assert.equal(project.notation, musicXmlToDsl(musicxml).notation);
+  assert.deepEqual([project.tempo, project.numerator, project.denominator], [72, 3, 4]);
+  assert.equal(project.title, 'XML practice');
+  assert.equal(project.playbackRate, 0.75);
+  assert.equal(project.noteOffset, -1.25);
+  assert.equal(project.backgroundVolume, 37);
+  const exported = serializeProject(source);
+  assert.equal(JSON.parse(exported).notation, project.notation);
+  assert.deepEqual(parseProjectFile(exported, 'xml-practice.chroma.json'), project);
+  assert.deepEqual(validateProject(project), project);
+});
+
+test('MusicXML-main validation never depends on a cached DSL field', () => {
+  for (const notation of [undefined, null, 123, 'wrong', ' '.repeat(100_001)]) {
+    const source = { version: 6, scoreFormat: 'musicxml', musicxml: MUSICXML_SCORE, notation };
+    if (notation === undefined) delete source.notation;
+    const project = validateProject(source);
+    assert.equal(project.notation, musicXmlToDsl(MUSICXML_SCORE).notation);
+    assert.equal(parseNotation(project.notation).errors.length, 0);
+  }
+});
+
+test('DSL-main projects discard stale autogenerated XML without changing source text', () => {
+  const notation = 'TEMP 82\r\nTSIG 6/8\r\n -4#q. | 5q. L 0q. ';
+  const project = validateProject({ ...DEFAULT_PROJECT, notation, musicxml: MUSICXML_SCORE });
+  assert.equal(project.scoreFormat, 'dsl');
+  assert.equal(project.musicxml, '');
+  assert.equal(project.notation, notation);
+  assert.equal(JSON.parse(serializeProject(project)).musicxml, '');
+  const old = validateProject({ version: 5, notation });
+  assert.equal(old.scoreFormat, 'dsl');
+  assert.equal(old.musicxml, '');
+  assert.equal(old.version, 6);
+});
+
+test('uncompressed MusicXML files open as XML-main with their original text and filename', () => {
+  for (const filename of ['Evening practice.musicxml', 'folder/Evening practice.XML', 'folder\\Evening practice.MUSICXML']) {
+    const imported = parseProjectFile(MUSICXML_SCORE, filename);
+    assert.equal(imported.scoreFormat, 'musicxml');
+    assert.equal(imported.title, 'Evening practice');
+    assert.equal(imported.musicxml, MUSICXML_SCORE);
+    assert.equal(imported.notation, musicXmlToDsl(MUSICXML_SCORE).notation);
+    assert.deepEqual([imported.tempo, imported.numerator, imported.denominator], [72, 3, 4]);
+    assert.equal(imported.playbackRate, 1);
+    assert.equal(imported.noteOffset, 0);
+  }
+  assert.equal(parseProjectFile(MUSICXML_SCORE, '.xml').title, 'Untitled practice');
+  const withBom = `\uFEFF${MUSICXML_SCORE}`;
+  assert.equal(parseProjectFile(withBom, 'bom.xml').musicxml, withBom);
+  assert.throws(() => parseProjectFile('compressed data', 'score.mxl'), /Compressed \.mxl.*uncompressed/);
+});
+
+test('unfinished MusicXML drafts autosave exactly and clear stale playback', () => {
+  for (const musicxml of ['', '<score-partwise>', '<score-partwise><part></score-partwise>', '<not-a-score/>']) {
+    const source = { ...DEFAULT_PROJECT, scoreFormat: 'musicxml', musicxml, notation: '12w' };
+    const draft = validateProject(source, { allowInvalidNotation: true });
+    assert.equal(draft.musicxml, musicxml);
+    assert.equal(draft.notation, '');
+    assert.deepEqual([draft.tempo, draft.numerator, draft.denominator], [60, 4, 4]);
+    assert.deepEqual(validateProject(draft, { allowInvalidNotation: true }), draft);
+    assert.throws(() => serializeProject(draft));
+    assert.throws(() => parseProjectFile(musicxml, 'unfinished.musicxml'));
+    assert.throws(() => parseProjectFile(JSON.stringify(source), 'unfinished.chroma'));
+    assert.throws(() => validateProject({ ...source, noteVolume: -1 }, { allowInvalidNotation: true }), /Note volume/);
+  }
+});
+
+test('main format and MusicXML source enforce their types and source size limit', () => {
+  for (const scoreFormat of ['', null, false, 'xml', 'DSL']) {
+    assert.throws(() => validateProject({ ...DEFAULT_PROJECT, scoreFormat }), /main score format/);
+  }
+  for (const musicxml of [undefined, null, false, 1, {}]) {
+    assert.throws(() => validateProject({ ...DEFAULT_PROJECT, scoreFormat: 'musicxml', musicxml }), /MusicXML as text/);
+    assert.throws(() => validateProject({ ...DEFAULT_PROJECT, scoreFormat: 'musicxml', musicxml }, { allowInvalidNotation: true }), /MusicXML as text/);
+  }
+  const oversized = ' '.repeat(MAX_MUSICXML_LENGTH + 1);
+  assert.throws(() => validateProject({ ...DEFAULT_PROJECT, scoreFormat: 'musicxml', musicxml: oversized }), /2,000,000/);
+  assert.throws(() => parseProjectFile(oversized, 'large.musicxml'), /2,000,000/);
+  const largestDraft = ' '.repeat(MAX_MUSICXML_LENGTH);
+  assert.equal(validateProject({ ...DEFAULT_PROJECT, scoreFormat: 'musicxml', musicxml: largestDraft }, { allowInvalidNotation: true }).musicxml, largestDraft);
+});
+
+test('a ChromaPlay XML export retains harmonica choices and raw DSL through project import', () => {
+  const notation = 'TEMP 82\r\nTSIG 6/8\r\n -4#q. | 5q. L 0q. TEMPO 120 TSIG 3/4 -12#h. ';
+  const { xml } = dslToMusicXml(notation, { title: 'Alternate holes' });
+  const imported = parseProjectFile(xml, 'Alternate holes.musicxml');
+  assert.equal(imported.notation, notation);
+  assert.equal(imported.musicxml, xml);
+  assert.deepEqual(parseProjectFile(serializeProject(imported), 'alternate.chroma'), imported);
 });

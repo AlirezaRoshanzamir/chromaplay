@@ -7,6 +7,7 @@ import { createTimeline } from './timeline.js';
 import { createScoreTiming } from './score-timing.js';
 import { WaveformTimeline } from './waveform.js';
 import { DEFAULT_PROJECT, validateProject, parseProjectFile, serializeProject } from './project.js';
+import { deriveScoreFormats, switchScoreFormat } from './score-formats.js';
 
 const $ = (id) => document.getElementById(id);
 const icons = {
@@ -41,6 +42,10 @@ let storageWarning = false;
 try { const saved = localStorage.getItem(STORAGE_KEY); if (saved) project = validateProject(JSON.parse(saved), { allowInvalidNotation: true }); }
 catch { storageWarning = true; }
 let parsed = parseNotation(project.notation);
+let sourceViews = null;
+let sourceViewsKey = null;
+let viewedFormat = project.scoreFormat || 'dsl';
+let requestedFormat = null;
 let scoreTiming = createScoreTiming(parsed);
 let timeline = createTimeline({ notes: parsed.notes, timing: scoreTiming, bpm: parsed.tempo, noteOffset: project.noteOffset, backgroundOffset: project.backgroundOffset, metronome: project.metronome, metronomeOffset: project.metronomeOffset });
 let position = 0;
@@ -107,7 +112,7 @@ resizeHandle.addEventListener('keydown', event => {
 });
 const noteEditor = new NoteEditor($('note-editor'), {
   onEditStart: () => { if (audio.isPlaying || pendingPlay) pausePlayback(); },
-  onChange: source => { stopForEdit(); project.notation = source; refreshScore({ reset: true }); save(); },
+  onChange: source => { if (project.scoreFormat === 'musicxml') return; stopForEdit(); project.notation = source; refreshScore({ reset: true }); save(); },
 });
 let lastEditorPosition = null;
 const holeElements = Array.from({ length: 12 }, (_, index) => {
@@ -127,7 +132,7 @@ manual = new ManualHarmonica($('harmonica'), {
   onStart: () => { if (audio.isPlaying || pendingPlay) pausePlayback(false); else playRequest++; },
   onChange: () => { activeIndex = -2; renderPosition(); updateTransport(); },
   onError: error => notify(error.message || 'Audio could not start in this browser.', true),
-  isBlocked: () => $('guide-dialog').open,
+  isBlocked: () => $('guide-dialog').open || $('format-dialog').open,
 });
 const alignHoles = () => {
   const canvasRect = $('visualizer').getBoundingClientRect();
@@ -157,8 +162,112 @@ function setRangeFill(element) {
   const percentage = (Number(element.value) - Number(element.min)) / (Number(element.max) - Number(element.min)) * 100;
   element.style.setProperty('--progress', `${Math.max(0, Math.min(100, percentage || 0))}%`);
 }
+function syncSourceViews() {
+  const format = project.scoreFormat || 'dsl';
+  const source = format === 'musicxml' ? project.musicxml : project.notation;
+  if (!sourceViewsKey || sourceViewsKey.format !== format || sourceViewsKey.source !== source || sourceViewsKey.title !== project.title) {
+    sourceViews = deriveScoreFormats(project);
+    sourceViewsKey = { format, source, title: project.title };
+    if (format === 'musicxml') {
+      project.notation = sourceViews.notation;
+      if (noteEditor.getValue() !== project.notation) noteEditor.setValue(project.notation);
+    }
+    if ($('musicxml-source').value !== sourceViews.musicxml) $('musicxml-source').value = sourceViews.musicxml;
+    $('conversion-warning-list').replaceChildren(...sourceViews.warnings.map(message => {
+      const item = document.createElement('li');
+      item.textContent = message;
+      return item;
+    }));
+  }
+  const xmlMain = format === 'musicxml';
+  noteEditor.setReadOnly(xmlMain);
+  $('musicxml-source').readOnly = !xmlMain;
+  $('musicxml-source').setAttribute('aria-readonly', String(!xmlMain));
+  $('main-format').value = format;
+  $('dsl-badge').textContent = xmlMain ? 'Generated' : 'Main';
+  $('musicxml-badge').textContent = xmlMain ? 'Main' : 'Generated';
+  $('copy-notes').disabled = !project.notation;
+  $('copy-musicxml').disabled = !sourceViews.musicxml;
+  $('download-musicxml').disabled = !sourceViews.musicxml || Boolean(sourceViews.error);
+  $('examples').disabled = xmlMain;
+  $('musicxml-help').textContent = xmlMain
+    ? 'Edit or paste MusicXML here, or use Import for a .musicxml or .xml file. Playback follows the converted DSL. Initial timing controls reflect this source; edit tempo and meter here.'
+    : sourceViews.error ? `MusicXML could not be generated: ${sourceViews.error}` : 'Generated from DSL. Select MusicXML as the main format to edit it.';
+  $('editor-help').textContent = xmlMain
+    ? 'Generated from MusicXML. Notes and timing are read-only here. Select DSL as the main format to edit them. Playback follows this conversion.'
+    : 'These controls set the initial tempo and time signature (defaults: 60 BPM and 4/4). Add TEMPO 120 or TSIG 6/8 anywhere between notes to change what follows. Click any box to edit. L starts a new line.';
+  $('conversion-warnings').hidden = !sourceViews.warnings.length;
+  $('conversion-warning-summary').textContent = `${sourceViews.warnings.length} conversion note${sourceViews.warnings.length === 1 ? '' : 's'} - review playback differences`;
+  showScoreTab(viewedFormat);
+}
+function showScoreTab(format, focus = false) {
+  viewedFormat = format;
+  for (const name of ['dsl', 'musicxml']) {
+    const selected = name === format;
+    $(`${name}-tab`).setAttribute('aria-selected', String(selected));
+    $(`${name}-tab`).tabIndex = selected ? 0 : -1;
+    $(`${name}-panel`).hidden = !selected;
+  }
+  const main = project.scoreFormat || 'dsl';
+  const label = format === 'dsl' ? 'DSL' : 'MusicXML';
+  const mainLabel = main === 'dsl' ? 'DSL' : 'MusicXML';
+  $('format-status').textContent = format === main ? `Editing ${label}. The other tab is generated automatically.`
+    : `Generated from ${mainLabel}. Read-only - select ${label} as the main format to edit it.`;
+  $('notation-hint').hidden = format !== 'dsl';
+  $('duration-reference').hidden = format !== 'dsl';
+  if (focus) $(`${format}-tab`).focus();
+}
+for (const name of ['dsl', 'musicxml']) {
+  $(`${name}-tab`).addEventListener('click', () => { noteEditor.commit(); showScoreTab(name); renderPosition(); });
+  $(`${name}-tab`).addEventListener('keydown', event => {
+    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+    event.preventDefault();
+    const target = event.key === 'Home' ? 'dsl' : event.key === 'End' ? 'musicxml' : name === 'dsl' ? 'musicxml' : 'dsl';
+    showScoreTab(target, true);
+    renderPosition();
+  });
+}
+$('musicxml-source').addEventListener('input', () => {
+  if (project.scoreFormat !== 'musicxml') return;
+  stopForEdit();
+  project.musicxml = $('musicxml-source').value;
+  refreshScore({ reset: true });
+  save();
+});
+$('main-format').addEventListener('change', () => {
+  const next = $('main-format').value;
+  $('main-format').value = project.scoreFormat || 'dsl';
+  if (next === (project.scoreFormat || 'dsl')) return;
+  noteEditor.commit();
+  syncSourceViews();
+  if (sourceViews.error) { notify('Fix the main source before changing formats. ' + sourceViews.error, true); return; }
+  requestedFormat = next;
+  pausePlayback();
+  const label = next === 'dsl' ? 'DSL' : 'MusicXML';
+  $('format-dialog-title').textContent = `Make ${label} the main format?`;
+  $('format-dialog-description').textContent = next === 'dsl'
+    ? 'The converted DSL will replace the original MusicXML as the main source. Download the MusicXML first if you want to keep its original details.'
+    : 'The generated MusicXML will become the main source. Future DSL content will be converted from it.';
+  $('format-dialog').showModal();
+  $('cancel-format').focus();
+});
+$('cancel-format').addEventListener('click', () => $('format-dialog').close());
+$('format-dialog').addEventListener('close', () => { requestedFormat = null; $('main-format').focus(); });
+$('confirm-format').addEventListener('click', () => {
+  if (!requestedFormat) return;
+  try {
+    stopForEdit();
+    project = switchScoreFormat(project, requestedFormat);
+    viewedFormat = requestedFormat;
+    noteEditor.setValue(project.notation);
+    refreshScore({ reset: true });
+    save();
+    $('format-dialog').close();
+  } catch (error) { notify(error.message, true); }
+});
 function applyProject() {
   $('score-title').value = project.title;
+  viewedFormat = project.scoreFormat || 'dsl';
   noteEditor.setValue(project.notation);
   $('background-offset').value = project.backgroundOffset;
   $('note-offset').value = project.noteOffset;
@@ -179,7 +288,9 @@ function applyProject() {
   refreshScore({ reset: true });
 }
 function refreshScore({ reset = false } = {}) {
+  syncSourceViews();
   parsed = parseNotation(project.notation);
+  if (project.scoreFormat === 'musicxml' && sourceViews.error) parsed.errors.push({ start: 0, message: sourceViews.error });
   scoreTiming = createScoreTiming(parsed);
   project.tempo = parsed.tempo;
   project.numerator = parsed.numerator;
@@ -187,7 +298,6 @@ function refreshScore({ reset = false } = {}) {
   syncTimingControls();
   audio.setTimeSignature(project.numerator, project.denominator);
   $('score-timing').textContent = `Initial: ${project.tempo} BPM / ${project.numerator}/${project.denominator}`;
-  $('copy-notes').disabled = project.notation.length === 0;
   visualizer.setScore(parsed.errors.length ? [] : parsed.notes, { timing: scoreTiming });
   lastEditorPosition = null;
   const count = parsed.notes.filter(note => !note.isRest).length;
@@ -197,7 +307,7 @@ function refreshScore({ reset = false } = {}) {
   $('bar-count').textContent = `${bars} bar${bars === 1 ? '' : 's'}`;
   $('score-valid').innerHTML = parsed.errors.length ? 'Check notation' : parsed.notes.length ? `${icon('check')} Ready to play` : 'Add your first note';
   $('score-errors').hidden = !parsed.errors.length;
-  $('score-errors').textContent = parsed.errors.slice(0, 3).map(error => `At character ${error.start + 1}: ${error.message}`).join(' ');
+  $('score-errors').textContent = project.scoreFormat === 'musicxml' && sourceViews.error ? sourceViews.error : parsed.errors.slice(0, 3).map(error => `At character ${error.start + 1}: ${error.message}`).join(' ');
   $('empty-visualizer').hidden = Boolean(parsed.notes.length && !parsed.errors.length);
   $('empty-visualizer').querySelector('strong').textContent = parsed.errors.length ? 'One small fix before we play.' : audio.background ? 'Your backing track is ready.' : 'A blank score. A fresh start.';
   $('empty-visualizer').querySelector('span:last-child').textContent = parsed.errors.length ? 'Check the highlighted notation in your score.' : audio.background ? 'Press Play to listen, or add notes to practice along.' : 'Write a few notes in your score to begin.';
@@ -378,16 +488,19 @@ let resumeAfterScrub = false;
 $('seek').addEventListener('pointerdown', () => { resumeAfterScrub = audio.isPlaying || pendingPlay; pausePlayback(); });
 $('seek').addEventListener('input', () => { if (audio.isPlaying) pausePlayback(); position = Number($('seek').value); renderPosition(); updateTransport(); });
 $('seek').addEventListener('change', () => { if (resumeAfterScrub && position < timeline.endBeat) void startPlayback(); resumeAfterScrub = false; });
-$('score-title').addEventListener('input', () => { project.title = $('score-title').value; save(); });
+$('score-title').addEventListener('input', () => { project.title = $('score-title').value; syncSourceViews(); save(); });
 
 function syncTimingControls() {
   for (const [id, value] of [['tempo', project.tempo], ['time-numerator', project.numerator], ['time-denominator', project.denominator]]) {
     if ($(id).value !== String(value)) $(id).value = value;
   }
-  $('tempo-down').disabled = project.tempo <= 30;
-  $('tempo-up').disabled = project.tempo >= 300;
+  const readOnly = project.scoreFormat === 'musicxml';
+  ['tempo', 'time-numerator', 'time-denominator'].forEach(id => { $(id).disabled = readOnly; });
+  $('tempo-down').disabled = readOnly || project.tempo <= 30;
+  $('tempo-up').disabled = readOnly || project.tempo >= 300;
 }
 function editScoreTiming(patch) {
+  if (project.scoreFormat === 'musicxml') return;
   try {
     const source = noteEditor.getValue();
     const updated = updateScoreTiming(source, patch);
@@ -513,6 +626,7 @@ const examples = {
   blank: { ...DEFAULT_PROJECT, title:'Untitled melody', notation:'' },
 };
 $('examples').addEventListener('change', () => {
+  if (project.scoreFormat === 'musicxml') return;
   const example = examples[$('examples').value];
   if (!example) return;
   stopForEdit();
@@ -520,12 +634,11 @@ $('examples').addEventListener('change', () => {
   applyProject(); save(); $('examples').value = '';
 });
 $('import-button').addEventListener('click', () => $('import-file').click());
-$('copy-notes').addEventListener('click', async () => {
-  const source = noteEditor.getValue();
+async function copyScoreText(source, button, label) {
   if (!source) return;
   try {
     await navigator.clipboard.writeText(source);
-    notify('Notes copied as text.');
+    notify(`${label} copied as text.`);
   } catch {
     // Older browsers may only support copying from a selected text field.
     const field = document.createElement('textarea');
@@ -537,15 +650,26 @@ $('copy-notes').addEventListener('click', async () => {
     let copied = false;
     try { copied = document.execCommand('copy'); } catch { /* Show the manual option below. */ }
     field.remove();
-    $('copy-notes').focus({ preventScroll: true });
-    notify(copied ? 'Notes copied as text.' : 'Copy was blocked. Select the notes and use your keyboard to copy.', !copied);
+    button.focus({ preventScroll: true });
+    notify(copied ? `${label} copied as text.` : 'Copy was blocked. Select the text and use your keyboard to copy.', !copied);
   }
+}
+$('copy-notes').addEventListener('click', () => { void copyScoreText(project.notation, $('copy-notes'), 'DSL'); });
+$('copy-musicxml').addEventListener('click', () => { void copyScoreText(sourceViews.musicxml, $('copy-musicxml'), 'MusicXML'); });
+$('download-musicxml').addEventListener('click', () => {
+  if (sourceViews.error || !sourceViews.musicxml) return;
+  const url = URL.createObjectURL(new Blob([sourceViews.musicxml], { type: 'application/vnd.recordare.musicxml+xml' }));
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = `${(project.title.trim() || 'my-score').replace(/[^a-zA-Z0-9 _-]/g, '').replace(/\s+/g, '-').toLowerCase() || 'my-score'}.musicxml`;
+  document.body.append(anchor); anchor.click(); anchor.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 });
 $('import-file').addEventListener('change', async () => {
   const file = $('import-file').files[0];
   if (!file) return;
   try {
-    if (file.size > 1024 * 1024) throw new Error('Choose a score smaller than 1 MB.');
+    if (file.size > 16 * 1024 * 1024) throw new Error('Choose a score smaller than 16 MB. MusicXML source is limited to 2 million characters.');
     const imported = parseProjectFile(await file.text(), file.name);
     stopForEdit(); project = imported; applyProject(); save();
     notify('Score imported. Backing tracks are loaded separately.');
@@ -602,7 +726,7 @@ const guide = $('guide-dialog');
 $('close-guide').addEventListener('click', () => guide.close());
 guide.addEventListener('click', event => { const rect = guide.getBoundingClientRect(); if (event.target === guide && (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom)) guide.close(); });
 document.addEventListener('keydown', event => {
-  if (event.defaultPrevented || guide.open || event.altKey || event.ctrlKey || event.metaKey || event.target.closest('input,textarea,select,button,[contenteditable=true],[role=slider]')) return;
+  if (event.defaultPrevented || guide.open || $('format-dialog').open || event.altKey || event.ctrlKey || event.metaKey || event.target.closest('input,textarea,select,button,[role=textbox],[role=slider]')) return;
   if (event.code === 'ArrowRight') { event.preventDefault(); stepNote(1); }
   if (event.code === 'Home') { event.preventDefault(); void seekTo(timeline.startBeat); }
 });
