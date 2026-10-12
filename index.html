@@ -17,8 +17,13 @@
   </header>
   <main>
     <section class="page-heading"><div><h1>Your practice studio<span>.</span></h1><p>Free to use. Source on GitHub. Runs entirely in your browser. No backend storage.</p></div><div class="file-actions"><button class="button secondary" id="import-button"><span data-icon="upload"></span> Import</button><button class="button secondary" id="export-button"><span data-icon="download"></span> Export score</button></div></section>
-    <div class="workspace">
-      <section class="practice-column" aria-label="Practice and playback">
+    <div class="layout-toolbar" role="group" aria-label="Workspace layout">
+      <label for="layout-columns">Layout <select id="layout-columns"><option value="1">1 column</option><option value="2">2 columns</option></select></label>
+      <label for="layout-width">Width <select id="layout-width"><option value="centered">Centered</option><option value="full">Full width</option></select></label>
+      <button class="button secondary" id="layout-reset" type="button">Reset layout</button>
+      <p id="layout-hint">Drag the handle below a panel to change its height.</p>
+    </div>
+    <div class="workspace" id="workspace" data-columns="1">
         <div class="visualizer-card" id="visualization-panel" data-panel aria-labelledby="visualization-heading">
           <div class="visualizer-top panel-heading"><h2 id="visualization-heading"><span class="status-dot" id="play-status-dot"></span> Visualization</h2><div class="panel-heading-actions"><span class="instrument-badge">12 holes <span>/</span> Key of C</span><button class="panel-toggle" type="button" data-panel-toggle data-panel-name="Visualization" aria-expanded="true" aria-controls="visualization-body">Hide</button></div></div>
           <div id="visualization-body"><span class="visually-hidden" id="play-status">READY WHEN YOU ARE</span>
@@ -27,7 +32,6 @@
           <div class="harmonica" id="harmonica" role="group" aria-label="Playable harmonica holes" aria-describedby="manual-help manual-key-map"></div>
           <div class="manual-controls"><p id="manual-help">Click a hole or hold its key to play.</p><div class="manual-modes"><button id="manual-draw" type="button" aria-pressed="false" title="Toggle draw, or hold D or Space while playing"><kbd>D</kbd><kbd>Space</kbd> Draw</button><button id="manual-slider" type="button" aria-pressed="false" title="Toggle the slider, or hold S or Left Arrow while playing"><kbd>S</kbd><kbd>Left</kbd> Slider <span>#</span></button></div><span class="manual-key-hint">Hold keys or click to toggle.</span><p class="manual-key-map" id="manual-key-map"><span><kbd>1</kbd>-<kbd>9</kbd> holes 1-9</span><span><kbd>0</kbd> hole 10</span><span><kbd>-</kbd> hole 11</span><span><kbd>=</kbd> hole 12</span></p></div>
           <div class="current-note-bar"><div class="current-note"><span class="current-direction" id="current-direction"><span data-icon="wind"></span></span><div><strong id="current-note-title">Let's play something</strong><span id="current-note-detail">Press play and follow the falling notes</span></div></div><span class="measure-indicator" id="measure-label">BAR 01 <span>/ 08</span></span></div>
-          <div class="visualizer-resize" id="visualizer-resize" role="separator" tabindex="0" aria-label="Resize visualization" aria-orientation="horizontal" aria-controls="visualizer" aria-valuemin="180" aria-valuemax="640" aria-valuenow="320" title="Drag up or down to resize. You can also use the Up and Down arrow keys."><span aria-hidden="true"></span></div>
           </div>
         </div>
         <section class="transport-card waveform-card" id="waveforms-panel" data-panel aria-labelledby="waveforms-heading">
@@ -55,8 +59,6 @@
           <div class="transport-settings"><div class="setting sound-setting"><label for="instrument">HARMONICA SOUND</label><select id="instrument" aria-describedby="instrument-status"><option value="synth">Synthesized reed</option><option value="fluid" selected>FluidR3 harmonica</option><option value="vcsl">VCSL chromatic harmonica</option></select><span id="instrument-status" class="instrument-status" role="status"></span></div></div>
           </div>
         </section>
-      </section>
-      <aside class="composer-column" aria-label="Score editor">
         <section class="card score-card" id="score-panel" data-panel aria-labelledby="score-heading">
           <div class="card-heading panel-heading"><h2 id="score-heading"><span data-icon="notes"></span> Your score</h2><div class="panel-heading-actions"><span class="saved-status" id="saved-status"><span class="status-dot"></span> Saved here</span><button class="panel-toggle" type="button" data-panel-toggle data-panel-name="Score" aria-expanded="true" aria-controls="score-body">Hide</button></div></div>
           <div id="score-body">
@@ -91,7 +93,6 @@
           <div class="duration-reference" id="duration-reference"><span><b>w</b> Whole</span><span><b>h</b> Half</span><span><b>q</b> Quarter</span><span><b>e</b> Eighth</span><span><b>s</b> 16th</span></div>
           </div>
         </section>
-      </aside>
       <section class="card sheet-card" id="sheet-card" data-panel aria-labelledby="sheet-heading">
         <div class="sheet-toolbar"><h2 id="sheet-heading"><span data-icon="book"></span> Sheet music</h2><div class="sheet-tools"><label class="sheet-follow"><input id="sheet-follow" type="checkbox" checked> Follow playback</label><div class="sheet-zoom" role="group" aria-label="Sheet music zoom"><button id="sheet-zoom-out" type="button" aria-label="Zoom out sheet music">-</button><output id="sheet-zoom-value" aria-live="polite">100%</output><button id="sheet-zoom-in" type="button" aria-label="Zoom in sheet music">+</button></div><button id="sheet-toggle" type="button" aria-expanded="true" aria-controls="sheet-body">Hide</button></div></div>
         <div id="sheet-body"><p class="sheet-help" id="sheet-help">From your MusicXML. The line follows Notes playback.</p><div class="sheet-status" id="sheet-status" role="status">Loading sheet music...</div><button class="button secondary" id="sheet-retry" type="button" hidden>Retry sheet music</button><div class="sheet-viewport" id="sheet-viewport" tabindex="0" role="region" aria-label="Music sheet" aria-describedby="sheet-help"><div class="sheet-stage" id="sheet-stage"><div id="sheet-notation"></div><div class="sheet-playhead" id="sheet-playhead" aria-hidden="true" hidden></div></div></div><p class="sheet-credit">Rendered with <a href="https://opensheetmusicdisplay.org/" target="_blank" rel="noopener noreferrer">OpenSheetMusicDisplay</a></p></div>
