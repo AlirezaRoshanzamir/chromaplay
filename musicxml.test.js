@@ -272,3 +272,103 @@ test('rejects malformed declarations, illegal names and misplaced document types
     '<!DOCTYPE wrong><score-partwise/>', '<score-partwise><!--x---></score-partwise>', '<score-partwise xmlns:a="urn:a"><a::note/></score-partwise>',
   ]) assert.throws(() => musicXmlToDsl(xml), /Invalid MusicXML/, xml);
 });
+
+const assertBeatMap = (result, expected) => {
+  assert.equal(result.beatMap.length, expected.length);
+  for (const [index, [sourceBeat, playbackBeat]] of expected.entries()) {
+    assert.ok(Math.abs(result.beatMap[index].sourceBeat - sourceBeat) < 1e-10, `source beat at boundary ${index}`);
+    assert.ok(Math.abs(result.beatMap[index].playbackBeat - playbackBeat) < 1e-10, `playback beat at boundary ${index}`);
+  }
+  assert.equal(result.beatMap.at(-1).playbackBeat, parseNotation(result.notation).totalBeats);
+};
+
+test('sheet beat map tracks every rounded tuplet note instead of stretching the whole score', () => {
+  const tuplets = attributes(12) + pitched('C', 4, 4) + pitched('D', 4, 4) + pitched('E', 4, 4);
+  const result = musicXmlToDsl(score(measure(tuplets, 'implicit="yes"') + measure(pitched('G', 4, 12))));
+  assert.deepEqual(tokens(result), ['1s.', '-1s.', '2s.', '3q']);
+  assertBeatMap(result, [[0, 0], [1 / 3, 3 / 8], [2 / 3, 6 / 8], [1, 9 / 8], [2, 17 / 8]]);
+  assert.deepEqual(result.sourceMeasureStarts, [0, 1]);
+});
+
+test('sheet beat map expands short notes individually and grace notes consume no cursor time', () => {
+  const grace = '<note><grace/><pitch><step>C</step><octave>4</octave></pitch><type>16th</type></note>';
+  const result = musicXmlToDsl(score(measure(attributes(8) + grace + pitched('C', 4, 1) + pitched('D', 4, 1) + pitched('E', 4, 8))));
+  assert.deepEqual(tokens(result), ['1s', '-1s', '2q']);
+  assertBeatMap(result, [[0, 0], [1 / 8, 1 / 4], [1 / 4, 1 / 2], [5 / 4, 3 / 2]]);
+});
+
+test('sheet beat map keeps timing changes at their corresponding source and playback boundaries', () => {
+  const body = attributes(12) + pitched('C', 4, 8)
+    + '<direction><offset>-4</offset><sound tempo="120"/></direction>' + pitched('D', 4, 12);
+  const result = musicXmlToDsl(score(measure(body)));
+  assertBeatMap(result, [[0, 0], [1 / 3, 3 / 8], [2 / 3, 3 / 4], [5 / 3, 7 / 4]]);
+  const tempo = parseNotation(result.notation).directives.find(directive => directive.kind === 'tempo' && directive.tempo === 120);
+  assert.equal(tempo.beat, result.beatMap[1].playbackBeat);
+});
+
+test('sheet beat map distributes a rounded tied span across every emitted DSL piece', () => {
+  const body = attributes(12) + pitched('C', 4, 4, '<tie type="start"/>') + pitched('C', 4, 4, '<tie type="stop"/>');
+  const result = musicXmlToDsl(score(measure(body)));
+  assert.deepEqual(tokens(result), ['1s.', '1s']);
+  assertBeatMap(result, [[0, 0], [2 / 5, 3 / 8], [2 / 3, 5 / 8]]);
+  // The original tie boundary at 1/3 remains inside the continuous mapped span.
+  assert.ok(Math.abs(result.beatMap[1].playbackBeat * (1 / 3) / result.beatMap[1].sourceBeat - 5 / 16) < 1e-10);
+});
+
+test('sheet beat map includes silent gaps and tails from omitted voices, with first-part measure starts', () => {
+  const body = attributes(12) + pitched('C', 4, 3, '<voice>1</voice>')
+    + '<forward><duration>3</duration></forward>' + pitched('D', 4, 4, '<voice>1</voice>')
+    + '<backup><duration>10</duration></backup>' + pitched('E', 4, 12, '<voice>2</voice>');
+  const firstPart = score(measure(body) + measure(pitched('G', 4, 12, '<voice>1</voice>')));
+  const xml = firstPart.replace('</score-partwise>', `<part id="P2">${measure(attributes(12) + pitched('C', 3, 48))}${measure(pitched('D', 3, 48))}</part></score-partwise>`);
+  const result = musicXmlToDsl(xml);
+  assert.deepEqual(tokens(result), ['1s', '0s', '-1s.', '0s', '3q']);
+  assertBeatMap(result, [[0, 0], [1 / 4, 1 / 4], [1 / 2, 1 / 2], [5 / 6, 7 / 8], [1, 9 / 8], [2, 17 / 8]]);
+  // The omitted second part lasts four beats per measure. The sheet renderer
+  // can align [0, 1] here to its own measure timestamps [0, 4].
+  assert.deepEqual(result.sourceMeasureStarts, [0, 1]);
+});
+
+test('unchanged embedded DSL uses an identity map and original XML measure starts without rewriting source', () => {
+  const original = ' TSIG 3/4\r\n1w L 0q TEMPO 90 TSIG 2/4 -4#w. ';
+  const xml = dslToMusicXml(original).xml;
+  const result = musicXmlToDsl(xml);
+  assert.equal(result.notation, original);
+  assert.deepEqual(result.warnings, []);
+  assertBeatMap(result, [[0, 0], [4, 4], [5, 5], [11, 11]]);
+  assert.deepEqual(result.sourceMeasureStarts, [0, 3, 5, 7, 9]);
+  assert.deepEqual(musicXmlToDsl(withoutMetadata(xml)).sourceMeasureStarts, result.sourceMeasureStarts);
+});
+
+test('empty unchanged DSL still supplies an origin and one measure start', () => {
+  for (const notation of ['', '\nL | ', 'TEMPO 90 TSIG 6/8']) {
+    const result = musicXmlToDsl(dslToMusicXml(notation).xml);
+    assertBeatMap(result, [[0, 0]]);
+    assert.deepEqual(result.sourceMeasureStarts, [0]);
+    assert.equal(result.notation, notation);
+  }
+});
+
+test('sheet beat map supports score-timewise pickups, backups, and division changes', () => {
+  const first = attributes(12) + pitched('C', 4, 4, '<voice>1</voice>') + '<backup><duration>4</duration></backup>' + pitched('E', 4, 4, '<voice>2</voice>');
+  const second = '<attributes><divisions>8</divisions></attributes>' + pitched('D', 4, 4, '<voice>1</voice>');
+  const xml = `<score-timewise><part-list><score-part id="P1"><part-name>Test</part-name></score-part></part-list><measure number="0" implicit="yes"><part id="P1">${first}</part></measure><measure number="1"><part id="P1">${second}</part></measure></score-timewise>`;
+  const result = musicXmlToDsl(xml);
+  assertBeatMap(result, [[0, 0], [1 / 3, 3 / 8], [5 / 6, 7 / 8]]);
+  assert.deepEqual(result.sourceMeasureStarts, [0, 1 / 3]);
+});
+
+test('sheet beat map includes rests leading to late tempo markings and deterministic zero-time jumps', () => {
+  const lateTempo = musicXmlToDsl(score(measure(attributes(12) + pitched('C', 4, 4) + '<sound tempo="90"><offset>4</offset></sound>')));
+  assertBeatMap(lateTempo, [[0, 0], [1 / 3, 3 / 8], [2 / 3, 3 / 4]]);
+  const tiny = musicXmlToDsl(score(measure(attributes(1) + pitched('C', 4, 0.00000005) + pitched('D', 4, 1))));
+  assertBeatMap(tiny, [[0, 0], [0.00000005, 0], [1.00000005, 1]]);
+  assert.deepEqual(tokens(tiny), ['-1q']);
+});
+
+test('sub-EPSILON source overlaps never move sheet beat boundaries backward', () => {
+  const result = musicXmlToDsl(score(measure(attributes(1) + pitched('C', 4, 1)
+    + '<backup><duration>0.00000005</duration></backup>' + pitched('D', 4, 1))));
+  assert.deepEqual(tokens(result), ['1q', '-1q']);
+  assertBeatMap(result, [[0, 0], [1, 1], [1.99999995, 2]]);
+});

@@ -8,6 +8,7 @@ import { createScoreTiming } from './score-timing.js';
 import { WaveformTimeline } from './waveform.js';
 import { DEFAULT_PROJECT, validateProject, parseProjectFile, serializeProject } from './project.js';
 import { deriveScoreFormats, switchScoreFormat } from './score-formats.js';
+import { SheetMusic } from './sheet-music.js';
 
 const $ = (id) => document.getElementById(id);
 const icons = {
@@ -65,6 +66,7 @@ const audio = new PracticeAudio({
 });
 const visualizer = new HarmonicaVisualizer($('visualizer'), { onSeek: beat => { void seekTo(transportBeatAtScoreBeat(beat)); } });
 const waveforms = new WaveformTimeline($('waveform-timeline'), { onSeek: seconds => { void seekTo(seconds * project.tempo / 60); } });
+const sheetMusic = new SheetMusic($('sheet-card'));
 const VISUALIZER_HEIGHT_KEY = 'chromaplay.visualizerHeight.v1';
 const resizeHandle = $('visualizer-resize');
 function applyVisualizerHeight(value) {
@@ -167,6 +169,7 @@ function syncSourceViews() {
   const source = format === 'musicxml' ? project.musicxml : project.notation;
   if (!sourceViewsKey || sourceViewsKey.format !== format || sourceViewsKey.source !== source || sourceViewsKey.title !== project.title) {
     sourceViews = deriveScoreFormats(project);
+    sheetMusic.setScore(sourceViews.musicxml, { error: sourceViews.error, notation: sourceViews.notation, warnings: sourceViews.warnings });
     sourceViewsKey = { format, source, title: project.title };
     if (format === 'musicxml') {
       project.notation = sourceViews.notation;
@@ -366,6 +369,7 @@ function renderPosition() {
   visualizer.setPosition(scoreBeat);
   noteEditor.setPosition(scoreBeat, { follow: audio.isPlaying || position !== lastEditorPosition });
   waveforms.setPosition(seconds, { follow: audio.isPlaying || position !== lastEditorPosition });
+  sheetMusic.setPosition(scoreBeat, { follow: audio.isPlaying || position !== lastEditorPosition });
   lastEditorPosition = position;
   const liveNote = manual?.note;
   const note = liveNote || currentNote();
