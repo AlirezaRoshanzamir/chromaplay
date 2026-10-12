@@ -1,5 +1,6 @@
 import { isInstrument, loadInstrument, nearestSample } from './instrument.js';
 import { createTimeline } from './timeline.js';
+import { BackgroundPlayer } from './background-player.js';
 
 const LOOKAHEAD_SECONDS = 0.2;
 const SCHEDULER_INTERVAL_MS = 25;
@@ -15,14 +16,18 @@ function clampVolume(value) {
 
 /** Browser-only score and backing-track playback, measured in quarter-note beats. */
 export class PracticeAudio {
-  constructor({ onStateChange, onEnded } = {}) {
+  constructor({ onStateChange, onEnded, onError, backgroundPlayerFactory = options => new BackgroundPlayer(options) } = {}) {
     this.onStateChange = onStateChange;
     this.onEnded = onEnded;
+    this.onError = onError;
+    this._backgroundPlayerFactory = backgroundPlayerFactory;
+    this._backgroundPlayer = null;
     this.isPlaying = false;
     this.background = null;
     this.noteVolume = 0.7;
     this.backgroundVolume = 0.65;
     this.metronomeVolume = 0.7;
+    this.playbackRate = 1;
     this.noteMuted = false;
     this.backgroundMuted = false;
     this.metronomeEnabled = false;
@@ -121,7 +126,24 @@ export class PracticeAudio {
     return context;
   }
 
-  async play({ notes = [], bpm, fromBeat = 0, noteOffset = 0, backgroundOffset = 0, metronome = this.metronomeEnabled, metronomeOffset = 0 }) {
+  _ensureBackgroundPlayer() {
+    if (!this._backgroundPlayer) {
+      this._backgroundPlayer = this._backgroundPlayerFactory({
+        audioContext: this._ensureContext(),
+        output: this._backgroundGain,
+        onError: error => this._handleBackgroundError(error),
+      });
+    }
+    return this._backgroundPlayer;
+  }
+
+  _handleBackgroundError(error, generation = this._generation) {
+    if (generation !== this._generation || !this.isPlaying) return;
+    this.pause();
+    this.onError?.(error);
+  }
+
+  async play({ notes = [], bpm, fromBeat = 0, noteOffset = 0, backgroundOffset = 0, metronome = this.metronomeEnabled, metronomeOffset = 0, playbackRate = 1 }) {
     this._cancelPlayback();
     const generation = this._generation;
     this._notes = [...(notes || [])].sort((a, b) => a.startBeat - b.startBeat);
@@ -130,6 +152,12 @@ export class PracticeAudio {
       this._notifyState();
       throw new Error('Tempo must be greater than zero.');
     }
+    const rate = Number(playbackRate);
+    if (!Number.isFinite(rate) || rate < 0.25 || rate > 2) {
+      this._notifyState();
+      throw new RangeError('Playback speed must be from 0.25 to 2.');
+    }
+    this.playbackRate = rate;
     this.metronomeEnabled = Boolean(metronome);
     this._timeline = this.getTimeline({ notes: this._notes, bpm: this._bpm, noteOffset, backgroundOffset, metronomeOffset });
     this._totalBeats = this._timeline.endBeat;
@@ -143,9 +171,14 @@ export class PracticeAudio {
 
     const context = this._ensureContext();
     const needsInstrument = this._notes.some(note => !note.isRest && note.endBeat + this._timeline.noteStartBeat > this._position);
-    await Promise.all([context.resume(), needsInstrument ? this.prepareInstrument() : Promise.resolve()]);
+    const needsBackground = this._backgroundBuffer && this._timeline.backgroundEndSeconds > this._position * 60 / this._bpm;
+    // Prime the same media element inside the user's play gesture, including when
+    // its audible start is delayed. The helper keeps this priming step silent.
+    const unlocked = needsBackground ? this._ensureBackgroundPlayer().unlock() : Promise.resolve(true);
+    const readiness = await Promise.all([context.resume(), needsInstrument ? this.prepareInstrument() : Promise.resolve(), unlocked]);
     // A pause, stop, or newer play request may arrive while the browser resumes audio.
     if (generation !== this._generation) return;
+    if (needsBackground && readiness[2] === false) throw new Error('The backing track could not start. Press Play to try again.');
     // Toggling the metronome while sound loads must also update the final bounds.
     this._timeline = this.getTimeline({ notes: this._notes, bpm: this._bpm, noteOffset, backgroundOffset, metronomeOffset });
     this._totalBeats = this._timeline.endBeat;
@@ -172,7 +205,7 @@ export class PracticeAudio {
   getPosition() {
     if (!this.isPlaying || !this._context) return this._position;
     const elapsed = Math.max(0, this._context.currentTime - this._startTime);
-    return Math.min(this._totalBeats, this._startBeat + elapsed * this._bpm / 60);
+    return Math.min(this._totalBeats, this._startBeat + elapsed * this._bpm / 60 * this.playbackRate);
   }
 
   pause() {
@@ -228,6 +261,19 @@ export class PracticeAudio {
     const bytes = await file.arrayBuffer();
     const buffer = await context.decodeAudioData(bytes);
     if (loadId !== this._backgroundLoadId) return this.background;
+    // Native media replacement discards its previous file immediately. Do not
+    // leave that old file's waveform paired with the pending media source.
+    this._backgroundBuffer = null;
+    this.background = null;
+    try {
+      const loaded = await this._ensureBackgroundPlayer().setFile(file);
+      if (loadId !== this._backgroundLoadId || loaded === false) return this.background;
+    } catch (error) {
+      if (loadId !== this._backgroundLoadId) return this.background;
+      this._backgroundBuffer = null;
+      this.background = null;
+      throw error;
+    }
     this._backgroundBuffer = buffer;
     this.background = { name: file.name || 'Backing track', duration: buffer.duration };
     this._cancelVoices('background');
@@ -238,6 +284,7 @@ export class PracticeAudio {
   clearBackground() {
     this._backgroundLoadId += 1;
     this._cancelVoices('background');
+    this._backgroundPlayer?.clear();
     this._backgroundBuffer = null;
     this.background = null;
   }
@@ -306,7 +353,7 @@ export class PracticeAudio {
   }
 
   _timeAtBeat(beat) {
-    return this._startTime + (beat - this._startBeat) * 60 / this._bpm;
+    return this._startTime + (beat - this._startBeat) * 60 / this._bpm / this.playbackRate;
   }
 
   _resetClickCursor(position) {
@@ -420,25 +467,24 @@ export class PracticeAudio {
     const earliestTime = Math.max(this._startTime, context.currentTime);
     const desiredStart = this._timeAtBeat(this._backgroundOffset * this._bpm / 60);
     const start = Math.max(earliestTime, desiredStart);
-    const bufferOffset = Math.max(0, start - desiredStart);
+    const bufferOffset = Math.max(0, start - desiredStart) * this.playbackRate;
     if (bufferOffset >= this._backgroundBuffer.duration || start >= this._endTime) return;
-    const source = context.createBufferSource();
-    source.buffer = this._backgroundBuffer;
-    source.connect(this._backgroundGain);
-    this._trackVoice(source, null, 'background');
-    source.start(start, bufferOffset);
-    source.stop(Math.min(this._endTime, desiredStart + this._backgroundBuffer.duration));
+    const generation = this._generation;
+    const endTime = Math.min(this._endTime, desiredStart + this._backgroundBuffer.duration / this.playbackRate);
+    this._ensureBackgroundPlayer().play({ when: start, offset: bufferOffset, playbackRate: this.playbackRate, endTime })
+      .catch(error => this._handleBackgroundError(error, generation));
   }
 
   _cancelVoices(type) {
     const now = this._context?.currentTime ?? 0;
+    if (!type || type === 'background') this._backgroundPlayer?.stop();
     for (const voice of [...this._voices]) {
       if (type && voice.type !== type) continue;
       if (voice.type === 'manual') {
         this._releaseManualVoice(voice);
         continue;
       }
-      // Stop future and currently sounding sources alike, including backing audio.
+      // Stop future and currently sounding note/click sources alike.
       try { voice.source.stop(now); } catch { /* A source may already have ended. */ }
       voice.source.disconnect();
       voice.gain?.disconnect();
