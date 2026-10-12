@@ -736,5 +736,29 @@ document.addEventListener('keydown', event => {
 });
 document.addEventListener('visibilitychange', () => { if (!document.hidden && audio.isPlaying) { position = audio.getPosition(); renderPosition(); } });
 window.addEventListener('pagehide', () => { audio.stop(); cancelFrames(); });
+
+document.querySelectorAll('[data-panel-toggle]').forEach(button => {
+  const content = $(button.getAttribute('aria-controls'));
+  const panel = button.closest('[data-panel]');
+  const update = () => {
+    const action = content.hidden ? 'Show' : 'Hide';
+    button.textContent = action;
+    button.setAttribute('aria-expanded', String(!content.hidden));
+    button.setAttribute('aria-label', `${action} ${button.dataset.panelName}`);
+    panel.classList.toggle('is-collapsed', content.hidden);
+  };
+  button.addEventListener('click', () => {
+    content.hidden = !content.hidden;
+    update();
+    if (!content.hidden) requestAnimationFrame(() => renderPosition());
+  });
+  update();
+});
+const playbackDock = $('playback-dock');
+const updateDockHeight = () => {
+  document.documentElement.style.setProperty('--playback-dock-height', `${Math.ceil(playbackDock.getBoundingClientRect().height)}px`);
+};
+new ResizeObserver(updateDockHeight).observe(playbackDock);
+updateDockHeight();
 applyProject();
 if (storageWarning) notify('Your saved score could not be restored. You can import a backup.', true);

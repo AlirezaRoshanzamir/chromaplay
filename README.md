@@ -22,6 +22,7 @@ Follow the falling notes or play the harmonica directly with your mouse and keyb
 - Global playback speed from 0.25x to 2x, keeping notes, backing audio, metronome, and visuals aligned without changing pitch.
 - Local backing tracks that can play alongside a score or on their own.
 - Plain-text copying, score import/export, and browser autosave.
+- Hide/Show controls for each main panel and a compact player fixed at the bottom of the screen.
 
 ChromaPlay is a static HTML, CSS, and JavaScript app with no application backend or account system. Sheet music uses a locally bundled copy of OpenSheetMusicDisplay. Score conversion, rendering, and playback run in your browser.
 
@@ -37,6 +38,8 @@ Open the [live app](https://alirezaroshanzamir.github.io/chromaplay/), try the i
 Editing notation or changing the score's timing controls pauses playback and returns to the beginning. Invalid notation is highlighted and must be fixed before playback or export.
 
 To use an existing MusicXML score, import a `.musicxml` or `.xml` file. It opens with **MusicXML** as the main format, and the **DSL** tab shows the playable conversion.
+
+Use **Hide** on a panel to collapse its contents while keeping its heading visible. **Show** opens it again. The bottom player can also be collapsed, and hiding a panel does not stop playback.
 
 ### Run locally
 
@@ -165,7 +168,7 @@ The converter checks that the instruction matches the note's sounding pitch. If 
 
 ![Sheet music with a moving playback line, zoom controls, and Follow playback](docs/screenshots/sheet-music.jpg)
 
-The **Sheet music** panel updates after you edit the score. When DSL is main, it displays the generated MusicXML. When MusicXML is main, it displays the original score, including supported details that the DSL conversion cannot express.
+The **Sheet music** panel sits below the score editor and updates after you edit the score. When DSL is main, it displays the generated MusicXML. When MusicXML is main, it displays the original score, including supported details that the DSL conversion cannot express.
 
 A vertical line moves smoothly through the sheet as the Notes part plays, including through rests. Use the existing **Play**, **Pause**, **Restart**, **Previous**, **Next**, and timeline controls. The line follows tempo changes, the Notes start delay, and global playback speed. Setting Notes volume to 0% keeps the line moving for silent practice. Backing track and metronome controls keep their existing behavior.
 
@@ -241,6 +244,8 @@ Editing a timing command or an initial control pauses playback and returns to th
 
 Use **Previous** and **Next** to move through notes and rests, **Restart** to return to time zero, or the timeline to seek. **Pause** pauses all parts together. Playback continues until the notes, backing track, and enabled metronome have all finished, and **Loop** repeats that full timeline. A backing track can play on its own when the score is empty.
 
+The compact player stays at the bottom of the screen as you scroll. It keeps playback buttons, speed, elapsed and total time, and seeking within reach. Waveforms stay in their panel on the page.
+
 The falling-note visualizer follows the score's position within the shared timeline. It continues through any time before the notes begin or after they finish while another part plays. The metronome has its own start delay and volume. Before applying that delay, its length is the longer of the score and backing track, so it can keep time through a track even with an empty score.
 
 Right Arrow moves to the next note and Home restarts when focus is outside the editor, inputs, buttons, and other controls, and the guide is closed. Space is the draw modifier, not a playback shortcut.
@@ -265,7 +270,7 @@ Short notes keep their hole and slider labels, using a smaller font when needed.
 
 ![Compact Notes, Track, and Metronome waveforms with independent volumes and start delays](docs/screenshots/audio-timeline.png)
 
-The player has matching **Notes**, **Track**, and **Metronome** waveform rows on the same time scale, with a shared playhead. The track waveform comes from your uploaded audio. The notes waveform previews the amplitude of the written melody with the selected harmonica sound, and the metronome shows its pulses. Use the zoom control to inspect a shorter stretch of the timeline, then scroll to another passage or zoom out to see more.
+The waveforms panel has matching **Notes**, **Track**, and **Metronome** rows on the same time scale, with a shared playhead. The track waveform comes from your uploaded audio. The notes waveform previews the amplitude of the written melody with the selected harmonica sound, and the metronome shows its pulses. Use the zoom control to inspect a shorter stretch of the timeline, then scroll to another passage or zoom out to see more.
 
 Each row has a volume slider with a percentage and its own **Start delay** in seconds. Volumes range from **0% to 100%**. Set any part to **0%** to mute it, or all three to **0%** for silent visual practice. Raising a slider restores that part's sound. Volume changes work during playback without moving the playhead. The Metronome row also has an on/off control.
 
