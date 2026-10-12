@@ -125,7 +125,8 @@ function editingHarness(source) {
   let selection = { anchor: source.length, focus: source.length };
   Object.assign(editor, {
     source, activeRange: null, undoStack: [], redoStack: [], lastEdit: null,
-    composing: false, chips: new Map(), directiveChips: new Map(),
+    composing: false, readOnly: false, chips: new Map(), directiveChips: new Map(),
+    editor: { contentEditable: 'true', attributes: new Map(), setAttribute(name, value) { this.attributes.set(name, value); } },
     selection: () => ({ ...selection }),
     restoreSelection: value => { selection = { ...value }; },
     revealCaret: () => {},
@@ -269,4 +270,114 @@ test('editing a header changes timing while following chip indices and source ra
   const opened = editorSegments(update.source, { start: result.notes[0].start, end: result.notes[0].end });
   assert.deepEqual(opened.segments.filter(segment => segment.type === 'note').map(segment => segment.note.token), ['-3#h']);
   assert.equal(opened.segments.map(segment => segment.text).join(''), update.source);
+});
+
+test('generated notation keeps chips and source selection while switching editing off and on', () => {
+  const source = 'TEMP\t90\n1qL TSIG 6/8 -2h';
+  const { editor, input, select } = editingHarness(source);
+  editor.openToken(editor.score.directives[0]);
+  select(0, source.length);
+  editor.setReadOnly(true);
+  assert.equal(editor.editor.contentEditable, 'false');
+  assert.equal(editor.editor.attributes.get('aria-readonly'), 'true');
+  assert.equal(editor.editor.tabIndex, 0);
+  assert.equal(editor.activeRange, null);
+  assert.equal(editor.chips.size, 2);
+  assert.equal(editor.directiveChips.size, 2);
+  assert.deepEqual(editor.selection(), { anchor: 0, focus: source.length });
+  editor.setValue('TEMPO 120\n3q -4h');
+  assert.equal(editor.getValue(), 'TEMPO 120\n3q -4h');
+  assert.equal(editor.readOnly, true);
+  assert.equal(editor.chips.size, 2);
+  editor.setReadOnly(false);
+  assert.equal(editor.editor.contentEditable, 'true');
+  assert.equal(editor.editor.attributes.get('aria-readonly'), 'false');
+  select(editor.source.length);
+  input(' 5q');
+  assert.equal(editor.getValue(), 'TEMPO 120\n3q -4h 5q');
+});
+
+test('read-only notation rejects every editing route without changing history or firing edit callbacks', () => {
+  const source = 'TEMPO 90\n1q -2h';
+  const { editor, select } = editingHarness(source);
+  editor.undoStack.push({ source: '4q', activeRange: null, selection: { anchor: 2, focus: 2 } });
+  editor.redoStack.push({ source: '5q', activeRange: null, selection: { anchor: 2, focus: 2 } });
+  const history = JSON.stringify([editor.undoStack, editor.redoStack]);
+  let edits = 0;
+  editor.onEditStart = () => { edits += 1; };
+  editor.onChange = () => { edits += 1; };
+  editor.setReadOnly(true);
+  select(0, source.length);
+  for (const inputType of ['insertText', 'insertParagraph', 'deleteContentBackward', 'historyUndo', 'historyRedo', 'insertCompositionText']) {
+    let prevented = false;
+    editor.beforeInput({ inputType, data: '4q', isComposing: true, cancelable: true, preventDefault() { prevented = true; } });
+    assert.equal(prevented, true, inputType);
+  }
+  editor.applyEdit(0, source.length, '4q');
+  editor.history(-1);
+  editor.history(1);
+  editor.openToken(editor.score.notes[0]);
+  editor.pointerDown({ button: 0, target: { closest() { throw new Error('Read-only clicks should use native selection'); } } });
+  editor.paste({ preventDefault() {}, clipboardData: { getData() { throw new Error('Read-only paste should not read clipboard data'); } } });
+  editor.compositionStart({ preventDefault() {} });
+  assert.equal(editor.composing, false);
+  // A late input event or composition end must never adopt mutated DOM text.
+  editor.editor.childNodes = [{ nodeType: 3, data: '9w' }];
+  editor.nativeInput();
+  editor.compositionEnd();
+  assert.equal(editor.source, source);
+  assert.equal(editor.activeRange, null);
+  assert.equal(JSON.stringify([editor.undoStack, editor.redoStack]), history);
+  assert.equal(edits, 0);
+});
+
+test('read-only keyboard and clipboard retain plain-text copying and block mutation shortcuts', () => {
+  const source = 'TEMP\t90\r\n1qL TSIG 6 / 8\n-2e';
+  const { editor, select } = editingHarness(source);
+  editor.setReadOnly(true);
+  select(3);
+  const key = (key, modifiers = {}) => {
+    let prevented = false;
+    editor.keyDown({ key, ...modifiers, preventDefault() { prevented = true; } });
+    return prevented;
+  };
+  assert.equal(key('a', { metaKey: true }), true);
+  assert.deepEqual(editor.selection(), { anchor: 0, focus: source.length });
+  for (const shortcut of ['z', 'y', 'v', 'x']) assert.equal(key(shortcut, { ctrlKey: true }), true);
+  for (const shortcut of ['1', 'Backspace', 'Delete', 'Enter']) assert.equal(key(shortcut), true);
+  for (const shortcut of ['Tab', 'ArrowLeft', 'Home', 'End']) assert.equal(key(shortcut), false);
+  assert.equal(key('c', { metaKey: true }), false);
+  const clipboard = new Map();
+  const event = { preventDefault() {}, clipboardData: { setData: (type, value) => clipboard.set(type, value) } };
+  editor.copy(event);
+  assert.equal(clipboard.get('text/plain'), source);
+  editor.copy(event, true);
+  assert.equal(clipboard.get('text/plain'), source);
+  assert.equal(editor.source, source);
+});
+
+test('read-only chips still show the current note and moving playback line', () => {
+  const { editor } = editingHarness('1q -2h');
+  editor.setReadOnly(true);
+  const chips = editor.score.notes.map(() => {
+    const classes = new Map();
+    const attributes = new Map();
+    return {
+      classes, attributes,
+      classList: { toggle: (name, value) => classes.set(name, value) },
+      setAttribute: (name, value) => attributes.set(name, value),
+      removeAttribute: name => attributes.delete(name),
+    };
+  });
+  editor.chips = new Map(chips.map((chip, index) => [index, chip]));
+  editor.playhead = { style: {} };
+  editor.root = { scrollLeft: 0, scrollTop: 0, clientLeft: 0, clientTop: 0, getBoundingClientRect: () => ({ left: 0, top: 0 }) };
+  editor.noteRect = (note, fraction) => ({ left: note.index * 100 + fraction * 100, top: 20, height: 26 });
+  editor.setPosition(2);
+  assert.equal(chips[0].classes.get('active'), false);
+  assert.equal(chips[1].classes.get('active'), true);
+  assert.equal(chips[1].attributes.get('aria-current'), 'true');
+  assert.equal(editor.playhead.hidden, false);
+  assert.equal(editor.playhead.style.transform, 'translate(150px, 20px)');
+  assert.equal(editor.playhead.style.height, '26px');
 });

@@ -84,6 +84,8 @@ export class NoteEditor {
     this.redoStack = [];
     this.lastEdit = null;
     this.composing = false;
+    this.readOnly = false;
+    this.editor.setAttribute('aria-readonly', 'false');
     this.editor.addEventListener('beforeinput', event => this.beforeInput(event));
     this.editor.addEventListener('input', () => this.nativeInput());
     this.editor.addEventListener('keydown', event => this.keyDown(event));
@@ -93,16 +95,8 @@ export class NoteEditor {
     this.editor.addEventListener('cut', event => this.copy(event, true));
     this.editor.addEventListener('drop', event => event.preventDefault());
     this.editor.addEventListener('blur', () => { if (!this.composing) this.commit(); });
-    this.editor.addEventListener('compositionstart', () => {
-      this.onEditStart?.();
-      this.compositionBefore = this.snapshot();
-      this.composing = true;
-    });
-    this.editor.addEventListener('compositionend', () => {
-      this.composing = false;
-      this.nativeInput(this.compositionBefore);
-      this.compositionBefore = null;
-    });
+    this.editor.addEventListener('compositionstart', event => this.compositionStart(event));
+    this.editor.addEventListener('compositionend', () => this.compositionEnd());
     this.root.addEventListener('scroll', () => this.setPosition(this.position), { passive: true });
     this.editor.addEventListener('scroll', () => this.setPosition(this.position), { passive: true });
     this.resizeObserver = new ResizeObserver(() => this.resizeChips());
@@ -111,6 +105,22 @@ export class NoteEditor {
   }
 
   getValue() { return this.source; }
+
+  setReadOnly(readOnly) {
+    const next = Boolean(readOnly);
+    if (next === this.readOnly) return;
+    const selection = this.selection();
+    this.readOnly = next;
+    this.editor.contentEditable = String(!next);
+    this.editor.setAttribute('aria-readonly', String(next));
+    // Generated notation still needs keyboard focus for selection and copying.
+    this.editor.tabIndex = 0;
+    this.activeRange = null;
+    this.lastEdit = null;
+    this.composing = false;
+    this.compositionBefore = null;
+    this.render(selection);
+  }
 
   setValue(source) {
     this.source = String(source);
@@ -122,7 +132,7 @@ export class NoteEditor {
   }
 
   commit() {
-    if (this.composing) return;
+    if (this.readOnly || this.composing) return;
     const selection = this.selection();
     this.activeRange = null;
     this.lastEdit = null;
@@ -217,7 +227,7 @@ export class NoteEditor {
         marker.dataset.sourceStart = String(segment.start);
         marker.dataset.sourceEnd = String(segment.end);
         marker.textContent = 'L';
-        marker.title = 'End of line. Click to select and replace or delete L.';
+        marker.title = this.readOnly ? 'End of line.' : 'End of line. Click to select and replace or delete L.';
         marker.setAttribute('aria-label', 'L: end of line');
         const lineBreak = document.createElement('br');
         lineBreak.dataset.editorLineBreak = '';
@@ -235,8 +245,8 @@ export class NoteEditor {
         const label = directive.kind === 'tempo' ? `TEMPO ${directive.tempo}` : `TSIG ${directive.numerator}/${directive.denominator}`;
         const description = directive.kind === 'tempo' ? `Tempo ${directive.tempo} BPM` : `Time signature ${directive.numerator}/${directive.denominator}`;
         chip.textContent = label;
-        chip.title = `${description}. Applies to following notes. Click to edit.`;
-        chip.setAttribute('aria-label', `${description}. Click to edit.`);
+        chip.title = `${description}. Applies to following notes.${this.readOnly ? '' : ' Click to edit.'}`;
+        chip.setAttribute('aria-label', `${description}.${this.readOnly ? '' : ' Click to edit.'}`);
         fragment.append(chip);
         this.directiveChips.set(directive.start, chip);
         continue;
@@ -254,8 +264,8 @@ export class NoteEditor {
       chip.style.setProperty('--note-fg', colors.foreground);
       chip.style.setProperty('--note-border', colors.border);
       const action = note.isRest ? 'Rest' : `${note.draw ? 'Draw' : 'Blow'} hole ${note.hole}${note.slider ? ', slider in' : ''}`;
-      chip.title = `${action}, ${note.beats} quarter-note beat${note.beats === 1 ? '' : 's'}. Click to edit ${note.token}.`;
-      chip.setAttribute('aria-label', `${note.token}: ${action}. Click to edit.`);
+      chip.title = `${action}, ${note.beats} quarter-note beat${note.beats === 1 ? '' : 's'}.${this.readOnly ? '' : ` Click to edit ${note.token}.`}`;
+      chip.setAttribute('aria-label', `${note.token}: ${action}.${this.readOnly ? '' : ' Click to edit.'}`);
       const label = document.createElement('span');
       label.className = 'chip-label';
       label.textContent = note.token;
@@ -289,6 +299,7 @@ export class NoteEditor {
   }
 
   applyEdit(start, end, text, { finish = false, kind = '' } = {}) {
+    if (this.readOnly) return;
     this.onEditStart?.();
     const before = this.snapshot();
     const update = replaceNotation(this.source, start, end, text);
@@ -307,6 +318,7 @@ export class NoteEditor {
   }
 
   beforeInput(event) {
+    if (this.readOnly) { event.preventDefault(); return; }
     if (this.composing || event.isComposing || !event.cancelable) return;
     const selection = this.selection();
     if (!selection) return;
@@ -376,6 +388,16 @@ export class NoteEditor {
   keyDown(event) {
     if (event.isComposing) return;
     const modifier = event.metaKey || event.ctrlKey;
+    if (this.readOnly) {
+      if (modifier && event.key.toLowerCase() === 'a') {
+        event.preventDefault();
+        this.restoreSelection({ anchor: 0, focus: this.source.length });
+      } else if (modifier && /^[zyvx]$/i.test(event.key)
+        || !modifier && (event.key.length === 1 || /^(Backspace|Delete|Enter)$/.test(event.key))) {
+        event.preventDefault();
+      }
+      return;
+    }
     if (modifier && event.key.toLowerCase() === 'z' || event.ctrlKey && event.key.toLowerCase() === 'y') {
       event.preventDefault();
       this.history(event.shiftKey || event.key.toLowerCase() === 'y' ? 1 : -1);
@@ -394,6 +416,7 @@ export class NoteEditor {
   }
 
   openToken(token, caret = token.end) {
+    if (this.readOnly) return;
     this.onEditStart?.();
     this.lastEdit = null;
     this.activeRange = { start: token.start, end: token.end };
@@ -403,7 +426,7 @@ export class NoteEditor {
   }
 
   pointerDown(event) {
-    if (event.button !== 0) return;
+    if (this.readOnly || event.button !== 0) return;
     const marker = event.target.closest('.note-line-break');
     if (marker && !event.shiftKey) {
       event.preventDefault();
@@ -428,6 +451,7 @@ export class NoteEditor {
 
   paste(event) {
     event.preventDefault();
+    if (this.readOnly) return;
     const selection = this.selection();
     if (!selection) return;
     this.applyEdit(Math.min(selection.anchor, selection.focus), Math.max(selection.anchor, selection.focus), event.clipboardData.getData('text/plain'), { finish: true });
@@ -440,10 +464,25 @@ export class NoteEditor {
     const start = Math.min(selection.anchor, selection.focus);
     const end = Math.max(selection.anchor, selection.focus);
     event.clipboardData.setData('text/plain', this.source.slice(start, end));
-    if (cut) this.applyEdit(start, end, '', { finish: true });
+    if (cut && !this.readOnly) this.applyEdit(start, end, '', { finish: true });
+  }
+
+  compositionStart(event) {
+    if (this.readOnly) { event.preventDefault(); return; }
+    this.onEditStart?.();
+    this.compositionBefore = this.snapshot();
+    this.composing = true;
+  }
+
+  compositionEnd() {
+    this.composing = false;
+    this.nativeInput(this.compositionBefore);
+    this.compositionBefore = null;
   }
 
   nativeInput(before = null) {
+    // Undo any unexpected browser or IME mutation without adopting it as source.
+    if (this.readOnly) { this.render(this.selection()); return; }
     if (this.composing) return;
     const source = sourceText(this.editor);
     if (source === this.source) return;
@@ -461,6 +500,7 @@ export class NoteEditor {
   }
 
   history(direction) {
+    if (this.readOnly) return;
     const from = direction < 0 ? this.undoStack : this.redoStack;
     const to = direction < 0 ? this.redoStack : this.undoStack;
     if (!from.length) return;

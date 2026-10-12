@@ -26,6 +26,7 @@ class FakeTarget {
   closest(selector) {
     if (selector === '[data-hole]') return this.dataset.hole ? this : null;
     if (this.attributes.role === 'slider' && selector.includes('[role="slider"]')) return this;
+    if (this.attributes.role === 'textbox' && selector.includes('[role="textbox"]')) return this;
     return this.blocked ? this : null;
   }
   querySelector() { return this.pitchLabel; }
@@ -383,4 +384,23 @@ test('mouse takeover clears keyboard notes and later key releases leave the mous
   assert.equal(f.changes.at(-1).hole, 7);
   f.root.dispatch('pointerup', { pointerId: 7 });
   assert.equal(f.changes.at(-1), null);
+});
+
+test('read-only score text keeps arrow selection and never triggers instrument shortcuts', t => {
+  const f = setup(t);
+  const score = new FakeTarget();
+  score.setAttribute('role', 'textbox');
+  score.setAttribute('contenteditable', 'false');
+  for (const code of ['ArrowLeft', 'Space', 'KeyD', 'KeyS', 'Digit1']) {
+    assert.equal(f.down(code, { target: score }).defaultPrevented, false, code);
+  }
+  assert.equal(f.audio.starts.length, 0);
+  assert.equal(f.drawButton.attributes['aria-pressed'], 'false');
+  assert.equal(f.sliderButton.attributes['aria-pressed'], 'false');
+  f.down('Digit1');
+  f.down('ArrowLeft');
+  f.document.dispatch('focusin', { target: score });
+  assert.equal(f.instrument.note, null);
+  assert.equal(f.sliderButton.attributes['aria-pressed'], 'false');
+  assert.equal(f.instrument.held.size, 0);
 });

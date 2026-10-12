@@ -17,6 +17,28 @@ main{max-width:1440px;margin:auto;padding:39px max(5vw,24px) 0}.page-heading{dis
 @media(max-width:380px){.site-header{padding:0 14px}.header-right{gap:8px}.brand{font-size:22px;gap:7px}.brand img{width:28px;height:28px}.header-right .text-button{font-size:9px;gap:4px}.header-right .text-button svg{width:14px;height:14px}}
 .playback-speed{display:flex;align-items:center;gap:7px;max-width:380px;margin-bottom:17px;font-size:11px;color:#637456}.playback-speed label{flex-shrink:0;margin-right:2px}.playback-speed button{display:flex;align-items:center;justify-content:center;flex-shrink:0;min-width:25px;height:27px;padding:0 7px;border:1px solid #e0e5d8;border-radius:5px;background:#f1f4eb;color:#536d45;font-size:14px}.playback-speed button:hover:not(:disabled){background:#e4eddb}.playback-speed #speed-reset{font-size:10px}.transport-card .playback-speed input[type=range]{width:auto;flex:1;min-width:35px}.playback-speed output{min-width:37px;text-align:center;font-variant-numeric:tabular-nums;font-weight:600;color:#405f34}
 .score-card { min-width: 0; }
+.score-format-toolbar { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 14px; border-bottom: 1px solid #e0e5d8; }
+.score-tabs { display: flex; gap: 5px; }
+.score-tabs button { display: flex; align-items: center; gap: 7px; background: transparent; padding: 12px 13px; border-bottom: 2px solid transparent; color: #7a8671; font-size: 12px; }
+.score-tabs button[aria-selected=true] { color: #36522d; border-color: #739365; font-weight: 600; }
+.score-tabs button span { border: 1px solid #dce3d3; border-radius: 4px; padding: 2px 5px; font-size: 9px; font-weight: 400; }
+.main-format-label { display: flex; align-items: center; gap: 8px; color: #718064; font-size: 11px; }
+.main-format-label select { border: 1px solid #dce3d3; border-radius: 5px; padding: 6px 23px 6px 8px; color: #405735; background-color: #f4f6ee; font-size: 11px; }
+.format-status { font-size: 11px; color: #78866f; margin: 12px 0 16px; line-height: 1.6; }
+#musicxml-source { width: 100%; height: 330px; resize: vertical; min-height: 180px; max-height: 75vh; padding: 14px; display: block; border: 1px solid #dfe5d5; border-radius: 7px; color: #405642; background: #f4f5ef; font: 12px/1.7 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; tab-size: 2; scrollbar-width: thin; }
+#musicxml-source:focus { border-color: #a4be95; outline: 2px solid #a9c19b30; outline-offset: 0; }
+#musicxml-source[readonly] { background: #f1f3ed; }
+.musicxml-guide, .conversion-warnings { margin-top: 12px; color: #68785d; font-size: 11px; line-height: 1.6; }
+.musicxml-guide summary, .conversion-warnings summary { cursor: pointer; }
+.musicxml-guide p { margin: 8px 0; }
+.musicxml-guide pre { white-space: pre-wrap; overflow-wrap: anywhere; background: #eef1e7; border-radius: 5px; padding: 10px; }
+.conversion-warnings { background: #fbf4e8; border: 1px solid #e9dcc4; border-radius: 6px; padding: 10px 12px; color: #886a3e; }
+.conversion-warnings ul { margin: 8px 0 0; padding-left: 18px; }
+#notation[aria-readonly=true] .note-chip, #notation[aria-readonly=true] .timing-chip, #notation[aria-readonly=true] .note-line-break { cursor: default; }
+.format-dialog-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 10px; margin-top: 25px; }
+.confirm-format { background: #d0e8bc; color: #35502b; }
+#format-dialog h2 { font-size: 20px; }
+@media(max-width:580px) { .score-format-toolbar { gap: 8px; padding-bottom: 10px; } .score-tabs button { padding: 10px 9px; } .main-format-label { margin-left: auto; } #musicxml-source { font-size: 11px; height: 300px; } }
 .score-settings { display: flex; align-items: center; flex-wrap: wrap; gap: 24px 36px; margin-bottom: 21px; }
 .tempo-stepper { display: flex; align-items: center; gap: 6px; }
 .tempo-stepper button { background: #f0f2e9; width: 26px; height: 28px; border-radius: 4px; color: #677a5c; font-size: 16px; }

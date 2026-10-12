@@ -12,6 +12,7 @@ Follow the falling notes or play the harmonica directly with your mouse and keyb
 
 - A simple notation language for holes, blow/draw, the slider, note lengths, and rests.
 - An inline score editor with duration-sized note boxes, breath colors, and a moving playhead.
+- DSL and MusicXML tabs, with one editable main format and an automatically converted view of the other.
 - A falling-note visualizer across all 12 holes, with adjustable height and labels for short notes.
 - Tempo and time signature changes anywhere in the score, with editable timing boxes and controls for the initial settings, plus a metronome, looping, seeking, and note-by-note navigation.
 - Three sounds: synthesized reed, FluidR3 harmonica, and recorded VCSL chromatic harmonica.
@@ -28,11 +29,13 @@ ChromaPlay is a static HTML, CSS, and JavaScript app. It has no application back
 Open the [live app](https://alirezaroshanzamir.github.io/chromaplay/), try the included warm-up, and press **Play**. To write your own score:
 
 1. Choose **Blank score** from the example menu, or edit the existing notes.
-2. Enter notation such as `1q -1q 2q -2q | 3h 0h`.
+2. Enter notation such as `1q -1q 2q -2q | 3h 0h` in the **DSL** tab. DSL is the main format for a new score.
 3. Set the initial tempo and time signature with the score controls, or write `TEMPO 90` and `TSIG 4/4` before the first note. Add more timing commands between notes wherever they change. Without initial commands, the score starts at 60 BPM and 4/4.
 4. Choose a sound, press **Play**, and follow the notes. Add a backing track if you want to play along.
 
 Editing notation or changing the score's timing controls pauses playback and returns to the beginning. Invalid notation is highlighted and must be fixed before playback or export.
+
+To use an existing MusicXML score, import a `.musicxml` or `.xml` file. It opens with **MusicXML** as the main format, and the **DSL** tab shows the playable conversion.
 
 ### Run locally
 
@@ -109,7 +112,7 @@ This displays two rows. Put `L` between complete notes, not inside a note. When 
 
 ### Editing note boxes
 
-Completed notes become compact, rounded boxes in the editor. Space, Enter, Tab, or leaving the editor finishes a note. Click a box to edit its original text. Plain-text copy/paste and undo/redo work in the editor; **Copy notes** copies the entire score.
+Completed notes become compact, rounded boxes in the editor. Space, Enter, Tab, or leaving the editor finishes a note. Click a box to edit its original text. Plain-text copy/paste and undo/redo work in the editor; **Copy DSL** copies the entire score.
 
 Valid `TEMPO` and `TSIG` commands become compact timing boxes in the same editor. Click one to edit its text, then press Tab or click outside the editor to finish. Timing boxes add no duration and keep the original text when copied or exported.
 
@@ -120,6 +123,42 @@ Blow notes are green, draw notes are red, and higher hole numbers use darker sha
 ![The inline score editor with colored note boxes, duration-based widths, and explicit line breaks](docs/screenshots/score-editor.jpg)
 
 Click a note box to edit its text. Use `L` to keep a phrase on its own row.
+
+## MusicXML
+
+![MusicXML source tab, copy and download controls, and main-format selector](docs/screenshots/musicxml-editor.jpg)
+
+The score panel has **DSL** and **MusicXML** tabs. Use **Main format** to choose which one you write in. The main tab is editable; the other is generated automatically and read-only. Playback always uses the DSL conversion, so both tabs describe the same practice session.
+
+Changing tabs only changes the view. Changing the main format asks for confirmation because automatic conversion can change or remove information. Before switching from MusicXML to DSL, download the XML if you want to keep information that DSL cannot express. Cancel to keep the current source. When you confirm, the current generated view becomes the editable main source. Fix source errors before switching formats or exporting.
+
+Each tab has its own copy button: **Copy DSL** copies DSL, and **Copy MusicXML** copies XML. **Download** in the MusicXML tab saves an uncompressed `.musicxml` file. **Export score** saves the full ChromaPlay project, including the main format and its original source. The initial tempo and time signature controls are read-only when MusicXML is main; edit those values in the XML source instead.
+
+### What conversion keeps
+
+MusicXML conversion supports pitched notes, rests, dotted durations, ties, tempo changes, and time signature changes. Export writes a single harmonica part, splits notes at measure boundaries with ties where needed, and includes playing instructions for each note. Import accepts partwise and timewise scores and reads a single melody: the first part and its first voice/staff. Written instrument transpositions are applied to get sounding pitches. Extra parts, voices, chord tones, and grace notes are omitted; repeats are not expanded. Conversion warnings explain when information is omitted or adjusted.
+
+DSL supports a smaller set of note lengths and timing settings than MusicXML. Rhythms outside that set can be approximated, and unavailable pitches, including microtones, become rests. Dynamics, lyrics, articulations, detailed engraving, and other notation that has no DSL equivalent do not affect playback. The original XML remains intact while MusicXML is the main format, even when the DSL view cannot represent everything.
+
+ChromaPlay XML exports include the original DSL text as metadata. If the musical content is unchanged, importing that file restores the exact DSL, including spaces, `L` markers, and visual separators. If the score has changed, ChromaPlay converts the current MusicXML instead of restoring an outdated copy. Other music apps may remove this metadata, so use `.chroma.json` to save a complete ChromaPlay project.
+
+Only uncompressed `.musicxml` and `.xml` files are supported. For a compressed `.mxl` file, export an uncompressed MusicXML file from the app that created it first. Conversion runs entirely in the browser.
+
+### Harmonica playing instructions
+
+Pitch alone cannot distinguish every playing option. For example, `4q`, `5q`, and `-4#q` all sound C5. ChromaPlay stores the hole, breath, and slider in MusicXML's standard [`other-technical` extension](https://www.w3.org/2021/06/musicxml40/musicxml-reference/elements/other-technical/) using a ChromaPlay-specific instruction:
+
+```xml
+<notations>
+  <technical>
+    <other-technical>chromaplay:hole=4;breath=draw;slide=in</other-technical>
+  </technical>
+</notations>
+```
+
+Put this inside the relevant `<note>`. Use `hole=1` through `hole=12`, `breath=blow` or `breath=draw`, and `slide=in` or `slide=out`. The example means draw hole 4 with the slider pressed. It must accompany a C5 pitch. The `#` in DSL means pressing the slider, not necessarily playing a sharp pitch.
+
+The converter checks that the instruction matches the note's sounding pitch. If it does not match, ChromaPlay warns and chooses a fingering from the pitch. Without an instruction, it also chooses a playable fingering automatically. Other MusicXML apps can display the technical text, but may not interpret it as harmonica tablature.
 
 ## Playing the harmonica
 
@@ -240,11 +279,11 @@ Choose a track from your device and adjust its timing in the player.
 
 ## Saving and privacy
 
-The current score and settings autosave to this browser's local storage, including unfinished notation. Storage belongs to the browser and site address. Clearing browser data removes it, and scores saved at another ChromaPlay address do not appear here automatically. Use export/import to move them.
+The current score and settings autosave to this browser's local storage, including the main format and unfinished DSL or MusicXML source. Storage belongs to the browser and site address. Clearing browser data removes it, and scores saved at another ChromaPlay address do not appear here automatically. Use export/import to move them.
 
-- **Export score** downloads a version 5 `.chroma.json` file with the title, notation and its tempo/meter headers, sound choice, playback speed, all three start delays and volumes, metronome on/off, and loop settings.
-- **Import** accepts `.json` and `.chroma` projects, or `.txt` notation. Text imports keep tempo/meter headers, use defaults for omitted settings, and use the filename as the title. Version 1 through 4 projects are migrated to the current format automatically, preserving their notes, selected sound, and existing volumes and delays, with playback speed set to 1x when it was not saved.
-- Imports validate notation and settings before replacing the score. Score files are limited to **1 MB**, and notation to **100,000 characters**.
+- **Export score** downloads a version 6 `.chroma.json` file with the title, main format, original source, derived notation and timing, sound choice, playback speed, all three start delays and volumes, metronome on/off, and loop settings.
+- **Import** accepts `.json` and `.chroma` projects, `.txt` notation, and uncompressed `.musicxml` or `.xml` scores. Text and XML imports use the filename as the title and defaults for omitted settings. Text imports become DSL-main; XML imports become MusicXML-main. Version 1 through 5 projects become DSL-main automatically, preserving their notes, selected sound, and existing volumes and delays, with playback speed set to 1x when it was not saved.
+- Imports validate the main source and settings before replacing the score. Score files are limited to **16 MB**. DSL is limited to **100,000 characters**, and MusicXML to **2,000,000 characters**. Invalid drafts can autosave, but cannot be exported until they are fixed.
 
 Backing audio stays in the current tab. It is not saved in local storage or included in an exported score. Select the file again after reloading the app or opening a score in another tab.
 
@@ -263,6 +302,8 @@ npm run build
 | --- | --- |
 | `app.js` | Interface, project state, and playback controls |
 | `notation.js` | Notation parser, timing commands, and pitch mapping |
+| `musicxml.js` | MusicXML conversion, harmonica annotations, and conversion warnings |
+| `score-formats.js` | Main format selection and generated score views |
 | `score-timing.js` | Tempo map, time conversion, changing meters, bar lines, and metronome pulses |
 | `note-editor.js` | Inline editing and score playhead |
 | `note-style.js` | Note colors and duration widths |

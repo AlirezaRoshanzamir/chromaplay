@@ -95,7 +95,7 @@ export class ManualHarmonica {
   }
 
   blocked(target) {
-    return this.isBlocked?.() || target.closest('input, textarea, select, [role="slider"], [contenteditable]:not([contenteditable="false"]), dialog');
+    return this.isBlocked?.() || target.closest('input, textarea, select, [role="textbox"], [role="slider"], [contenteditable]:not([contenteditable="false"]), dialog');
   }
 
   modeForKey(code) { return ['KeyD', 'Space'].includes(code) ? 'draw' : ['KeyS', 'ArrowLeft'].includes(code) ? 'slider' : null; }

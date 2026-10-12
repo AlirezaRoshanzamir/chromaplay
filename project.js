@@ -1,8 +1,12 @@
 import { parseNotation } from './notation.js';
+import { MAX_MUSICXML_LENGTH, musicXmlToDsl } from './musicxml.js';
+export { MAX_MUSICXML_LENGTH } from './musicxml.js';
 
 export const DEFAULT_PROJECT = Object.freeze({
-  version: 5,
+  version: 6,
   title: 'Morning warm-up',
+  scoreFormat: 'dsl',
+  musicxml: '',
   notation: [
     'TEMPO 90',
     'TSIG 4/4',
@@ -76,22 +80,50 @@ export function validateProject(input, { allowInvalidNotation = false } = {}) {
   if (Object.hasOwn(input, 'format') && input.format !== PROJECT_FORMAT) {
     throw new Error('This file is not a ChromaPlay project.');
   }
-  if (Object.hasOwn(input, 'version') && ![1, 2, 3, 4, 5].includes(input.version)) {
-    throw new Error('This project version is not supported. Use a version 1, 2, 3, 4, or 5 project.');
+  if (Object.hasOwn(input, 'version') && ![1, 2, 3, 4, 5, 6].includes(input.version)) {
+    throw new Error('This project version is not supported. Use a version 1, 2, 3, 4, 5, or 6 project.');
   }
-  if (!Object.hasOwn(input, 'notation') || typeof input.notation !== 'string') {
-    throw new Error('The project must include notation as text.');
+  const scoreFormat = Object.hasOwn(input, 'scoreFormat') ? input.scoreFormat : 'dsl';
+  if (!['dsl', 'musicxml'].includes(scoreFormat)) {
+    throw new Error('The main score format must be dsl or musicxml.');
   }
-  if (input.notation.length > MAX_NOTATION_LENGTH) {
-    throw new Error('Notation must contain 100,000 characters or fewer.');
+  if (scoreFormat === 'musicxml') {
+    if (typeof input.musicxml !== 'string') {
+      throw new Error('A MusicXML-main project must include MusicXML as text.');
+    }
+    if (input.musicxml.length > MAX_MUSICXML_LENGTH) {
+      throw new Error('MusicXML must contain 2,000,000 characters or fewer.');
+    }
+  } else {
+    if (!Object.hasOwn(input, 'notation') || typeof input.notation !== 'string') {
+      throw new Error('The project must include notation as text.');
+    }
+    if (input.notation.length > MAX_NOTATION_LENGTH) {
+      throw new Error('Notation must contain 100,000 characters or fewer.');
+    }
   }
 
   const project = {};
   for (const field of Object.keys(DEFAULT_PROJECT)) {
     project[field] = Object.hasOwn(input, field) ? input[field] : DEFAULT_PROJECT[field];
   }
-  project.version = 5;
-  project.notation = [2, 3, 4, 5].includes(input.version) ? input.notation : migrateLegacyNotation(input);
+  project.version = 6;
+  project.scoreFormat = scoreFormat;
+  project.musicxml = scoreFormat === 'musicxml' ? input.musicxml : '';
+  if (scoreFormat === 'musicxml') {
+    try {
+      project.notation = musicXmlToDsl(project.musicxml).notation;
+    } catch (error) {
+      if (!allowInvalidNotation) throw error;
+      // Keep unfinished source drafts, but never play a stale conversion.
+      project.notation = '';
+    }
+  } else {
+    project.notation = [2, 3, 4, 5, 6].includes(input.version) ? input.notation : migrateLegacyNotation(input);
+  }
+  if (project.notation.length > MAX_NOTATION_LENGTH) {
+    throw new Error('Notation must contain 100,000 characters or fewer.');
+  }
   if (typeof project.title !== 'string' || project.title.length > 100) {
     throw new Error('The title must be text with 100 characters or fewer.');
   }
@@ -140,13 +172,26 @@ export function validateProject(input, { allowInvalidNotation = false } = {}) {
   return project;
 }
 
-/** Import a saved JSON project or a plain-text notation file. */
+/** Import a saved JSON project, plain-text notation, or uncompressed MusicXML. */
 export function parseProjectFile(text, filename) {
   if (typeof text !== 'string') throw new Error('The file must contain text.');
-  if (typeof filename !== 'string') throw new Error('Choose a .chroma, .json, or .txt file.');
+  const fileHint = 'Choose a .chroma, .json, .txt, .musicxml, or .xml file.';
+  if (typeof filename !== 'string') throw new Error(fileHint);
   // Some text editors add a UTF-8 byte-order mark at the start of a file.
   const content = text.replace(/^\uFEFF/, '');
   const extension = /\.([^.]+)$/.exec(filename)?.[1].toLowerCase();
+  if (extension === 'mxl') {
+    throw new Error('Compressed .mxl files are not supported. Export an uncompressed .musicxml or .xml file from your music app.');
+  }
+  if (extension === 'musicxml' || extension === 'xml') {
+    const basename = filename.split(/[\\/]/).pop().replace(/\.(musicxml|xml)$/i, '');
+    return validateProject({
+      ...DEFAULT_PROJECT,
+      title: basename.trim().slice(0, 100) || 'Untitled practice',
+      scoreFormat: 'musicxml',
+      musicxml: text,
+    });
+  }
   if (extension === 'txt') {
     const basename = filename.split(/[\\/]/).pop().replace(/\.txt$/i, '');
     return validateProject({
@@ -156,7 +201,7 @@ export function parseProjectFile(text, filename) {
     });
   }
   if (extension !== 'chroma' && extension !== 'json') {
-    throw new Error('Choose a .chroma, .json, or .txt file.');
+    throw new Error(fileHint);
   }
   let parsed;
   try {
