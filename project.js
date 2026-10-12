@@ -41,7 +41,7 @@ function checkNumber(value, field, minimum, maximum, integer = false) {
 /** Move old playback settings into the score once, when a version 1 file opens. */
 function migrateLegacyNotation(input) {
   let notation = input.notation;
-  const { directives } = parseNotation(notation);
+  const directives = parseNotation(notation).directives.filter(directive => directive.beat === 0);
   const tempoHeader = directives.find((directive) => directive.kind === 'tempo');
   const signatureHeader = directives.some((directive) => directive.kind === 'time-signature');
   if (!signatureHeader && (Object.hasOwn(input, 'numerator') || Object.hasOwn(input, 'denominator'))) {

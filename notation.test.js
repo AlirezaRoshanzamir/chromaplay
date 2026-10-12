@@ -164,9 +164,9 @@ test('each header is optional and missing values use tempo 60 and 4/4', () => {
   }
 });
 
-test('malformed headers stay outside the timeline and report their source ranges', () => {
-  for (const header of ['TEMPO', 'TEMPO120', 'TEMP 1q', 'TEMPO 29', 'TEMPO 301', 'TEMPO 60.5', 'TEMPO -60',
-    'TSIG', 'TSIG6/8', 'TSIG 0/4', 'TSIG 33/4', 'TSIG 4/3', 'TSIG 4.5/4', 'TSIG 4/4 2q', 'TSIG 4/']) {
+test('malformed directives stay outside the timeline and report their source ranges', () => {
+  for (const header of ['TEMPO', 'TEMPO120', 'TEMPO 29', 'TEMPO 301', 'TEMPO 60.5', 'TEMPO -60',
+    'TSIG', 'TSIG6/8', 'TSIG 0/4', 'TSIG 33/4', 'TSIG 4/3', 'TSIG 4.5/4', 'TSIG 4/']) {
     const source = `  ${header}\n-3#q`;
     const result = parseNotation(source);
     assert.equal(result.errors.length, 1, header);
@@ -178,32 +178,58 @@ test('malformed headers stay outside the timeline and report their source ranges
   }
 });
 
-test('duplicate headers include the TEMP alias and do not replace earlier settings', () => {
+test('repeated initial directives use the last valid value of each kind', () => {
   const result = parseNotation('TEMPO 120\nTEMP 90\nTSIG 6/8\nTSIG 3/4\n1q');
-  assert.equal(result.errors.length, 2);
-  assert.ok(result.errors.every(error => error.message.startsWith('Use only one')));
-  assert.deepEqual([result.tempo, result.numerator, result.denominator], [120, 6, 8]);
-  assert.deepEqual(result.directives.map(({ valid }) => valid), [true, false, true, false]);
+  assert.deepEqual(result.errors, []);
+  assert.deepEqual([result.tempo, result.numerator, result.denominator], [90, 3, 4]);
+  assert.deepEqual(result.directives.map(({ valid, beat }) => [valid, beat]), [[true, 0], [true, 0], [true, 0], [true, 0]]);
   assert.equal(result.totalBeats, 1);
+  const invalidLast = parseNotation('TEMPO 120 TEMP wrong TSIG 6/8 TSIG 0/4 1q');
+  assert.deepEqual([invalidLast.tempo, invalidLast.numerator, invalidLast.denominator], [120, 6, 8]);
 });
 
-test('headers after notes or beside notes report placement errors without eating neighboring notes', () => {
+test('directives after notes take effect at their current beat and retain the initial defaults', () => {
   const source = '1q\nTEMPO 90\n2q TSIG 3/4\n-3h';
   const result = parseNotation(source);
-  assert.equal(result.errors.length, 2);
-  assert.ok(result.errors.every(error => error.message.includes('before the notes')));
-  assert.deepEqual(result.errors.map(({ start, end }) => source.slice(start, end)), ['TEMPO 90', 'TSIG 3/4']);
+  assert.deepEqual(result.errors, []);
+  assert.deepEqual(result.directives.map(({ start, end, beat }) => [source.slice(start, end), beat]), [['TEMPO 90', 1], ['TSIG 3/4', 2]]);
   assert.deepEqual(result.notes.map(({ token }) => token), ['1q', '2q', '-3h']);
   assert.deepEqual([result.tempo, result.numerator, result.denominator], [60, 4, 4]);
   assert.equal(result.totalBeats, 4);
 });
 
-test('a misplaced header cannot join incomplete note fragments across its line', () => {
+test('a timing directive cannot join incomplete note fragments across its position', () => {
   const result = parseNotation('1\nTEMPO 120\nq\n2e');
   assert.deepEqual(result.notes.map(({ token }) => token), ['2e']);
-  assert.equal(result.errors.length, 3);
+  assert.equal(result.errors.length, 2);
   assert.ok(result.errors[0].start < result.errors[1].start);
-  assert.ok(result.errors[1].start < result.errors[2].start);
+  assert.equal(result.directives[0].beat, 0);
+});
+
+test('inline changes retain exact ranges and work beside notes and visual line markers', () => {
+  const source = 'TEMPO 60\tTSIG 4 / 4  1qTEMPO 120-1q L TSIG 6/8\t2eLTEMP 90L0h';
+  const result = parseNotation(source);
+  assert.deepEqual(result.errors, []);
+  assert.deepEqual(result.notes.map(({ token, startBeat }) => [token, startBeat]), [['1q', 0], ['-1q', 1], ['2e', 2], ['0h', 2.5]]);
+  assert.deepEqual(result.directives.map(({ start, end, beat }) => [source.slice(start, end), beat]), [
+    ['TEMPO 60', 0], ['TSIG 4 / 4', 0], ['TEMPO 120', 1], ['TSIG 6/8', 2], ['TEMP 90', 2.5],
+  ]);
+  assert.equal(result.totalBeats, 4.5);
+  assert.deepEqual([result.tempo, result.numerator, result.denominator], [60, 4, 4]);
+});
+
+test('incomplete timing values do not swallow the next note or directive', () => {
+  for (const [source, invalid, tokens] of [
+    ['1q TEMP 2e TEMPO 90 -3q', ['TEMP'], ['1q', '2e', '-3q']],
+    ['TEMPO TSIG 6/8 1q', ['TEMPO'], ['1q']],
+    ['TSIG 4/ 2q TEMPO 120 3q', ['TSIG 4/'], ['2q', '3q']],
+    ['1q TEMPO wrong -2q TSIG 4/3 3q', ['TEMPO wrong', 'TSIG 4/3'], ['1q', '-2q', '3q']],
+    ['TEMPO\n1q TSIG\n2q', ['TEMPO', 'TSIG'], ['1q', '2q']],
+  ]) {
+    const result = parseNotation(source);
+    assert.deepEqual(result.errors.map(({ start, end }) => source.slice(start, end)), invalid, source);
+    assert.deepEqual(result.notes.map(note => note.token), tokens, source);
+  }
 });
 
 test('pitch inputs and duration formatting handle boundary values', () => {
@@ -249,25 +275,31 @@ test('controls repair simple malformed headers without normalizing other invalid
   assert.equal(updateScoreTiming('TEMPO60\n1q', { tempo: 90 }), 'TEMPO 90\n1q');
 });
 
-test('duplicate and misplaced headers remain visible instead of being silently removed', () => {
+test('controls update only the effective initial directive and preserve every later change', () => {
   const duplicate = 'TEMPO 60\nTEMP 80\nTSIG 3/4\n1q';
   const updated = updateScoreTiming(duplicate, { tempo: 90 });
-  assert.equal(updated, 'TEMPO 90\nTEMP 80\nTSIG 3/4\n1q');
-  assert.ok(parseNotation(updated).errors.some(error => error.message.includes('only one')));
+  assert.equal(updated, 'TEMPO 60\nTEMP 90\nTSIG 3/4\n1q');
+  assert.deepEqual(parseNotation(updated).errors, []);
   const misplaced = '1q\nTEMPO 80\n-3#h';
   const fixedTop = updateScoreTiming(misplaced, { tempo: 90 });
   assert.equal(fixedTop, `TEMPO 90\n${misplaced}`);
-  assert.ok(parseNotation(fixedTop).errors.some(error => error.message.includes('before the notes')));
+  assert.deepEqual(parseNotation(fixedTop).errors, []);
   assert.equal(updateScoreTiming('1q TEMPO 60\n2q', { tempo: 90 }), 'TEMPO 90\n1q TEMPO 60\n2q');
+  const mixed = 'TEMPO 60 TSIG 3/4 TSIG 6/8 1q TEMPO 120 TSIG 2/4 -3#h';
+  assert.equal(updateScoreTiming(mixed, { tempo: 90, numerator: 5 }), 'TEMPO 90 TSIG 3/4 TSIG 5/8 1q TEMPO 120 TSIG 2/4 -3#h');
+  assert.equal(updateScoreTiming('TEMPO 60 TEMP wrong 1q', { tempo: 90 }), 'TEMPO 90 TEMP wrong 1q');
 });
 
-test('ambiguous header repairs never discard music or another header on the same line', () => {
+test('inline timing controls preserve complete notes, incomplete notes, and neighboring directives', () => {
   for (const source of ['TEMPO 90 1q\n2h', 'TEMP 1 q L\n2h', 'TEMPO 60 TSIG 4/4\n1q',
     'TEMPO 90 -3#\n2q', 'TEMPO 90 -\n2q', 'TEMP 90 1\n2q', 'TEMPO 90 | 1\n2q']) {
-    assert.throws(() => updateScoreTiming(source, { tempo: 90 }), /Edit the TEMPO line directly/);
+    const parsed = parseNotation(source);
+    const target = parsed.directives[0];
+    const updated = updateScoreTiming(source, { tempo: 90 });
+    assert.ok(updated.endsWith(source.slice(target.end)), source);
   }
-  assert.throws(() => updateScoreTiming('TSIG 4/4 -3#q\n1q', { denominator: 8 }), /Edit the TSIG line directly/);
-  assert.throws(() => updateScoreTiming('TSIG 4/4 | 1\n2q', { numerator: 3 }), /Edit the TSIG line directly/);
+  assert.equal(updateScoreTiming('TSIG 4/4 -3#q\n1q', { denominator: 8 }), 'TSIG 4/8 -3#q\n1q');
+  assert.equal(updateScoreTiming('TSIG 4/4 | 1\n2q', { numerator: 3 }), 'TSIG 3/4 | 1\n2q');
 });
 
 test('timing patches reject invalid values and leave empty patches unchanged', () => {

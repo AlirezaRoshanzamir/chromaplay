@@ -4,6 +4,7 @@ import { HarmonicaVisualizer } from './visualizer.js';
 import { NoteEditor } from './note-editor.js';
 import { ManualHarmonica } from './manual-play.js';
 import { createTimeline } from './timeline.js';
+import { createScoreTiming } from './score-timing.js';
 import { WaveformTimeline } from './waveform.js';
 import { DEFAULT_PROJECT, validateProject, parseProjectFile, serializeProject } from './project.js';
 
@@ -40,7 +41,8 @@ let storageWarning = false;
 try { const saved = localStorage.getItem(STORAGE_KEY); if (saved) project = validateProject(JSON.parse(saved), { allowInvalidNotation: true }); }
 catch { storageWarning = true; }
 let parsed = parseNotation(project.notation);
-let timeline = createTimeline({ notes: parsed.notes, bpm: parsed.tempo, noteOffset: project.noteOffset, backgroundOffset: project.backgroundOffset, metronome: project.metronome, metronomeOffset: project.metronomeOffset });
+let scoreTiming = createScoreTiming(parsed);
+let timeline = createTimeline({ notes: parsed.notes, timing: scoreTiming, bpm: parsed.tempo, noteOffset: project.noteOffset, backgroundOffset: project.backgroundOffset, metronome: project.metronome, metronomeOffset: project.metronomeOffset });
 let position = 0;
 let activeIndex = -2;
 let pendingPlay = false;
@@ -56,7 +58,7 @@ const audio = new PracticeAudio({
   onEnded: () => { position = timeline.endBeat; renderPosition(); if (project.loop) { position = timeline.startBeat; void startPlayback(); } },
   onError: error => { pausePlayback(); notify(error.message || 'Backing track playback failed. Try playing again.', true); },
 });
-const visualizer = new HarmonicaVisualizer($('visualizer'), { onSeek: beat => { void seekTo(beat + timeline.noteStartBeat); } });
+const visualizer = new HarmonicaVisualizer($('visualizer'), { onSeek: beat => { void seekTo(transportBeatAtScoreBeat(beat)); } });
 const waveforms = new WaveformTimeline($('waveform-timeline'), { onSeek: seconds => { void seekTo(seconds * project.tempo / 60); } });
 const VISUALIZER_HEIGHT_KEY = 'chromaplay.visualizerHeight.v1';
 const resizeHandle = $('visualizer-resize');
@@ -178,28 +180,28 @@ function applyProject() {
 }
 function refreshScore({ reset = false } = {}) {
   parsed = parseNotation(project.notation);
+  scoreTiming = createScoreTiming(parsed);
   project.tempo = parsed.tempo;
   project.numerator = parsed.numerator;
   project.denominator = parsed.denominator;
   syncTimingControls();
   audio.setTimeSignature(project.numerator, project.denominator);
-  $('score-timing').textContent = `${project.tempo} BPM / ${project.numerator}/${project.denominator}`;
+  $('score-timing').textContent = `Initial: ${project.tempo} BPM / ${project.numerator}/${project.denominator}`;
   $('copy-notes').disabled = project.notation.length === 0;
-  const barBeats = project.numerator * 4 / project.denominator;
-  visualizer.setScore(parsed.errors.length ? [] : parsed.notes, { beatsPerBar: barBeats });
+  visualizer.setScore(parsed.errors.length ? [] : parsed.notes, { timing: scoreTiming });
   lastEditorPosition = null;
   const count = parsed.notes.filter(note => !note.isRest).length;
   const rests = parsed.notes.length - count;
   $('note-count').textContent = `${count} note${count === 1 ? '' : 's'}${rests ? ` + ${rests} rest${rests === 1 ? '' : 's'}` : ''}`;
-  const bars = parsed.totalBeats / barBeats;
-  $('bar-count').textContent = `${Number(bars.toFixed(2))} bar${bars === 1 ? '' : 's'}`;
+  const bars = scoreTiming.totalBars;
+  $('bar-count').textContent = `${bars} bar${bars === 1 ? '' : 's'}`;
   $('score-valid').innerHTML = parsed.errors.length ? 'Check notation' : parsed.notes.length ? `${icon('check')} Ready to play` : 'Add your first note';
   $('score-errors').hidden = !parsed.errors.length;
   $('score-errors').textContent = parsed.errors.slice(0, 3).map(error => `At character ${error.start + 1}: ${error.message}`).join(' ');
   $('empty-visualizer').hidden = Boolean(parsed.notes.length && !parsed.errors.length);
   $('empty-visualizer').querySelector('strong').textContent = parsed.errors.length ? 'One small fix before we play.' : audio.background ? 'Your backing track is ready.' : 'A blank score. A fresh start.';
   $('empty-visualizer').querySelector('span:last-child').textContent = parsed.errors.length ? 'Check the highlighted notation in your score.' : audio.background ? 'Press Play to listen, or add notes to practice along.' : 'Write a few notes in your score to begin.';
-  timeline = audio.getTimeline({ notes: parsed.errors.length ? [] : parsed.notes, bpm: project.tempo, noteOffset: project.noteOffset, backgroundOffset: project.backgroundOffset, metronome: project.metronome, metronomeOffset: project.metronomeOffset });
+  timeline = audio.getTimeline({ notes: parsed.errors.length ? [] : parsed.notes, timing: scoreTiming, bpm: project.tempo, noteOffset: project.noteOffset, backgroundOffset: project.backgroundOffset, metronome: project.metronome, metronomeOffset: project.metronomeOffset });
   $('total-time').textContent = formatDuration(timeline.durationSeconds);
   $('seek').min = timeline.startBeat;
   $('seek').max = timeline.durationBeats ? timeline.endBeat : timeline.startBeat + 1;
@@ -223,12 +225,20 @@ function refreshWaveforms() {
   $('track-lane-duration').textContent = audio.background ? formatDuration(audio.background.duration) : '';
   $('track-lane-name').textContent = audio.background?.name || '';
   $('track-lane-name').title = audio.background?.name || '';
-  waveforms.setData({ timeline, notes: parsed.errors.length ? [] : parsed.notes, bpm: project.tempo, instrument: project.instrument,
+  waveforms.setData({ timeline, timing: scoreTiming, notes: parsed.errors.length ? [] : parsed.notes, bpm: project.tempo, instrument: project.instrument,
     instrumentData: audio.getInstrumentData(), backgroundBuffer: audio.getBackgroundBuffer(), noteVolume: project.noteVolume / 100, backgroundVolume: project.backgroundVolume / 100, metronome: project.metronome, metronomeVolume: project.metronomeVolume / 100, numerator: project.numerator, denominator: project.denominator });
   waveforms.setPosition(position * 60 / project.tempo);
 }
+function scoreBeatAtPosition(at = position) {
+  const beat = scoreTiming.secondsToBeat(at * 60 / project.tempo - timeline.noteStartSeconds);
+  // Keep a paused seek exactly on its note boundary after time conversions.
+  return Math.round(beat * 1e9) / 1e9;
+}
+function transportBeatAtScoreBeat(beat) {
+  return (timeline.noteStartSeconds + scoreTiming.beatToSeconds(beat)) * project.tempo / 60;
+}
 function currentNote() {
-  const scoreBeat = position - timeline.noteStartBeat;
+  const scoreBeat = scoreBeatAtPosition();
   if (parsed.errors.length || scoreBeat < 0) return null;
   // Binary search keeps highlighting quick even for long imported scores.
   let low = 0, high = parsed.notes.length - 1;
@@ -241,7 +251,7 @@ function currentNote() {
   return null;
 }
 function renderPosition() {
-  const scoreBeat = position - timeline.noteStartBeat;
+  const scoreBeat = scoreBeatAtPosition();
   const seconds = position * 60 / project.tempo;
   visualizer.setPosition(scoreBeat);
   noteEditor.setPosition(scoreBeat, { follow: audio.isPlaying || position !== lastEditorPosition });
@@ -262,7 +272,7 @@ function renderPosition() {
     $('current-direction').style.color = note.draw ? '#eab09a' : '#b4edb1';
   } else if (timeline.hasNotes && scoreBeat < 0) {
     $('current-note-title').textContent = 'Getting ready for the notes';
-    $('current-note-detail').textContent = `Your first note in ${(-scoreBeat * 60 / project.tempo / project.playbackRate).toFixed(1)} seconds`;
+    $('current-note-detail').textContent = `Your first note in ${((timeline.noteStartSeconds - seconds) / project.playbackRate).toFixed(1)} seconds`;
     $('current-direction').innerHTML = icon('headphones');
   } else if (note) {
     const length = { w:'Whole', h:'Half', q:'Quarter', e:'Eighth', s:'Sixteenth' }[note.duration];
@@ -276,8 +286,9 @@ function renderPosition() {
     $('current-note-detail').textContent = waiting ? `Track starts in ${((timeline.backgroundStartSeconds - seconds) / project.playbackRate).toFixed(1)} seconds` : audio.background.name;
     $('current-direction').innerHTML = icon('headphones');
   } else if (timeline.hasMetronome && seconds < timeline.metronomeEndSeconds) {
+    const meter = scoreTiming.settingsAtBeat(scoreTiming.secondsToBeat(seconds - timeline.metronomeStartSeconds));
     $('current-note-title').textContent = 'Metronome';
-    $('current-note-detail').textContent = seconds < timeline.metronomeStartSeconds ? `Clicks start in ${((timeline.metronomeStartSeconds - seconds) / project.playbackRate).toFixed(1)} seconds` : `${Number((project.tempo * project.playbackRate).toFixed(2))} BPM / ${project.numerator}/${project.denominator}`;
+    $('current-note-detail').textContent = seconds < timeline.metronomeStartSeconds ? `Clicks start in ${((timeline.metronomeStartSeconds - seconds) / project.playbackRate).toFixed(1)} seconds` : `${Number((meter.tempo * project.playbackRate).toFixed(2))} BPM / ${meter.numerator}/${meter.denominator}`;
     $('current-direction').innerHTML = icon('metronome');
   } else {
     const finished = timeline.durationBeats > 0 && position >= timeline.endBeat;
@@ -285,8 +296,8 @@ function renderPosition() {
     $('current-note-detail').textContent = finished ? 'Restart to take it from the top' : 'Write a melody or add a backing track';
     $('current-direction').innerHTML = icon('wind');
   }
-  const totalBars = Math.max(1, Math.ceil(parsed.totalBeats / (project.numerator * 4 / project.denominator)));
-  const currentBar = Math.min(totalBars, Math.floor(Math.max(0, scoreBeat) / (project.numerator * 4 / project.denominator)) + 1);
+  const totalBars = Math.max(1, scoreTiming.totalBars);
+  const currentBar = Math.min(totalBars, scoreTiming.barAtBeat(Math.max(0, scoreBeat)));
   $('measure-label').innerHTML = timeline.hasNotes ? `BAR ${String(currentBar).padStart(2,'0')} <span>/ ${String(totalBars).padStart(2,'0')}</span>` : 'TRACK';
   $('elapsed').textContent = formatDuration(Math.max(0, seconds - timeline.startSeconds));
   $('seek').value = position;
@@ -326,7 +337,7 @@ async function startPlayback() {
     $('instrument-status').classList.remove('error');
   }
   try {
-    await audio.play({ notes: parsed.notes, bpm: project.tempo, playbackRate: project.playbackRate, fromBeat: position, noteOffset: project.noteOffset, backgroundOffset: project.backgroundOffset, metronome: project.metronome, metronomeOffset: project.metronomeOffset });
+    await audio.play({ notes: parsed.notes, timing: scoreTiming, bpm: project.tempo, playbackRate: project.playbackRate, fromBeat: position, noteOffset: project.noteOffset, backgroundOffset: project.backgroundOffset, metronome: project.metronome, metronomeOffset: project.metronomeOffset });
     if (request === playRequest && project.instrument !== 'synth') $('instrument-status').textContent = 'Ready';
   } catch (error) {
     if (request === playRequest) {
@@ -350,11 +361,11 @@ async function seekTo(beat) {
 }
 function stepNote(direction) {
   if (!parsed.notes.length || parsed.errors.length) return;
-  const beat = (audio.isPlaying ? audio.getPosition() : position) - timeline.noteStartBeat;
+  const beat = scoreBeatAtPosition(audio.isPlaying ? audio.getPosition() : position);
   let target;
   if (direction > 0) target = parsed.notes.find(note => note.startBeat > beat + 0.025)?.startBeat;
   else target = [...parsed.notes].reverse().find(note => note.startBeat < beat - 0.08)?.startBeat;
-  void seekTo(target === undefined ? (direction > 0 ? timeline.endBeat : timeline.startBeat) : target + timeline.noteStartBeat);
+  void seekTo(target === undefined ? (direction > 0 ? timeline.endBeat : timeline.startBeat) : transportBeatAtScoreBeat(target));
 }
 function stopForEdit() {
   pausePlayback(); position = timeline.startBeat;
@@ -498,6 +509,7 @@ const examples = {
   warmup: { ...DEFAULT_PROJECT },
   chromatic: { ...DEFAULT_PROJECT, title:'Chromatic steps', notation:'TEMPO 75\nTSIG 4/4\n1q 1#q -1q -1#q |\n2q -2q -2#q 3q |\n3#q -3q -3#q -4q |\n4h 0h' },
   waltz: { ...DEFAULT_PROJECT, title:'A little 6/8', notation:'TEMPO 70\nTSIG 6/8\n1q. 2e 3e 2e |\n-1q. -2q. |\n2e 3e 4e -4e -3e 3e |\n2h. |\n1q. 2e 3e 2e |\n-1e 2e -2e 3q. |\n4q. -4q. |\n4h 0q' },
+  changes: { ...DEFAULT_PROJECT, title:'Tempo and meter changes', notation:'TEMPO 60 TSIG 4/4\n1q -1q 2q -2q\nTEMPO 90 3q -3q -4q 4q\nTSIG 6/8 4q. -4q. | 3q. -3q.\nTEMPO 60 TSIG 4/4 2h 1h' },
   blank: { ...DEFAULT_PROJECT, title:'Untitled melody', notation:'' },
 };
 $('examples').addEventListener('change', () => {

@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { parseNotation } from './notation.js';
 import { HarmonicaVisualizer } from './visualizer.js';
+import { createScoreTiming } from './score-timing.js';
 
 function setup(t, width = 960, height = 340) {
   const originalWindow = globalThis.window;
@@ -101,4 +102,23 @@ test('a partially played sixteenth keeps its label until its duration ends', t =
   const f = setup(t, 960, 180);
   assert.deepEqual(f.render('-12#s 1q', 0.23).map(label => label.text), ['12#', '1']);
   assert.deepEqual(f.render('-12#s 1q', 0.25).map(label => label.text), ['1']);
+});
+
+test('visual measure lines follow changing meters while notes keep their score beat positions', t => {
+  const { visualizer, labels } = setup(t, 960, 640);
+  const score = parseNotation('1w TSIG 3/4 2h 2q TSIG 6/8 3q. 4q.');
+  visualizer.setScore(score.notes, { timing: createScoreTiming(score) });
+  const lines = [];
+  let y;
+  visualizer.ctx.moveTo = (x, atY) => { y = atY; };
+  visualizer.ctx.stroke = () => {
+    if (visualizer.ctx.strokeStyle === '#3a4b44') lines.push(y);
+  };
+  labels.length = 0;
+  visualizer.setPosition(3);
+  const beatHeight = (640 - 21 - 30) / 8;
+  assert.deepEqual(lines, [4, 7, 10].map(beat => 619 - (beat - 3) * beatHeight + 0.5));
+  assert.equal(visualizer.hitAreas[0].startBeat, 0);
+  assert.ok(visualizer.hitAreas.some(area => area.startBeat === 7));
+  assert.deepEqual(labels.filter(label => label.color === '#789187').map(label => label.text), ['02', '03', '04']);
 });
