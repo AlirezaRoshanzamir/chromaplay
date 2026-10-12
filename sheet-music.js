@@ -99,11 +99,14 @@ export class SheetMusic {
     this.zoomOut.addEventListener('click', () => this.setZoom(this.zoom - 0.1));
     this.zoomIn.addEventListener('click', () => this.setZoom(this.zoom + 0.1));
     this.follow.addEventListener('change', () => this.setPosition(this.position, { follow: this.follow.checked }));
+    find('sheet-toggle').setAttribute('aria-label', 'Hide Sheet music');
     find('sheet-toggle').addEventListener('click', () => {
       this.collapsed = !this.collapsed;
       this.body.hidden = this.collapsed;
+      this.card.classList.toggle('is-collapsed', this.collapsed);
       find('sheet-toggle').textContent = this.collapsed ? 'Show' : 'Hide';
       find('sheet-toggle').setAttribute('aria-expanded', String(!this.collapsed));
+      find('sheet-toggle').setAttribute('aria-label', `${this.collapsed ? 'Show' : 'Hide'} Sheet music`);
       if (!this.collapsed) { if (!this.ready) this.schedule(); else this.relayout(); }
     });
     let width = 0;
