@@ -25,6 +25,7 @@ class FakeTarget {
   }
   closest(selector) {
     if (selector === '[data-hole]') return this.dataset.hole ? this : null;
+    if (this.attributes.role === 'slider' && selector.includes('[role="slider"]')) return this;
     return this.blocked ? this : null;
   }
   querySelector() { return this.pitchLabel; }
@@ -293,6 +294,56 @@ test('editing, dialogs, composing, and modified shortcuts do not play or consume
   assert.equal(f.audio.starts.length, 0);
   assert.equal(f.drawButton.attributes['aria-pressed'], 'false');
   assert.equal(f.sliderButton.attributes['aria-pressed'], 'false');
+});
+
+test('a focused waveform slider keeps navigation and number keys out of manual playing', t => {
+  const f = setup(t);
+  const waveform = new FakeTarget();
+  waveform.setAttribute('role', 'slider');
+  for (const code of ['ArrowLeft', 'ArrowRight', 'Home', 'End', 'Digit1', 'Minus', 'Equal', 'Space', 'KeyD', 'KeyS']) {
+    assert.equal(f.down(code, { target: waveform }).defaultPrevented, false, code);
+    assert.equal(f.up(code, { target: waveform }).defaultPrevented, false, code);
+  }
+  assert.equal(f.audio.starts.length, 0);
+  assert.equal(f.instrument.note, null);
+  assert.equal(f.drawButton.attributes['aria-pressed'], 'false');
+  assert.equal(f.sliderButton.attributes['aria-pressed'], 'false');
+});
+
+test('handled keydowns cannot retune or replace a held note, but its release still stops it', t => {
+  const f = setup(t);
+  f.down('Digit1');
+  for (const code of ['ArrowLeft', 'Space', 'Digit2']) {
+    f.down(code, { defaultPrevented: true });
+    f.up(code);
+  }
+  assert.deepEqual(f.audio.starts, [60]);
+  assert.equal(f.instrument.note.token, '1');
+  assert.equal(f.drawButton.attributes['aria-pressed'], 'false');
+  assert.equal(f.sliderButton.attributes['aria-pressed'], 'false');
+  f.up('Digit1', { defaultPrevented: true });
+  assert.equal(f.instrument.note, null);
+  assert.equal(f.audio.stops, 1);
+});
+
+test('moving focus to a waveform releases held notes and modifiers before seeking', t => {
+  const f = setup(t);
+  const waveform = new FakeTarget();
+  waveform.setAttribute('role', 'slider');
+  f.down('Digit1');
+  f.down('ArrowLeft');
+  f.down('Space');
+  assert.equal(f.instrument.note.token, '-1#');
+  f.document.dispatch('focusin', { target: waveform });
+  assert.equal(f.instrument.note, null);
+  assert.equal(f.drawButton.attributes['aria-pressed'], 'false');
+  assert.equal(f.sliderButton.attributes['aria-pressed'], 'false');
+  const starts = f.audio.starts.length;
+  f.up('Digit1', { target: waveform });
+  f.up('ArrowLeft', { target: waveform });
+  f.up('Space', { target: waveform });
+  assert.equal(f.audio.starts.length, starts);
+  assert.equal(f.instrument.note, null);
 });
 
 test('blur and editing focus clear held notes so later releases cannot revive audio', t => {

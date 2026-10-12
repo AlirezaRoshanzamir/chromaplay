@@ -55,7 +55,7 @@ export class ManualHarmonica {
       });
     }
     document.addEventListener('keydown', event => {
-      if (event.isComposing || event.altKey || event.ctrlKey || event.metaKey || this.blocked(event.target)) return;
+      if (event.defaultPrevented || event.isComposing || event.altKey || event.ctrlKey || event.metaKey || this.blocked(event.target)) return;
       const mode = this.modeForKey(event.code);
       if (mode) {
         event.preventDefault();
@@ -95,7 +95,7 @@ export class ManualHarmonica {
   }
 
   blocked(target) {
-    return this.isBlocked?.() || target.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"]), dialog');
+    return this.isBlocked?.() || target.closest('input, textarea, select, [role="slider"], [contenteditable]:not([contenteditable="false"]), dialog');
   }
 
   modeForKey(code) { return ['KeyD', 'Space'].includes(code) ? 'draw' : ['KeyS', 'ArrowLeft'].includes(code) ? 'slider' : null; }

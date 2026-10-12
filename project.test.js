@@ -11,9 +11,10 @@ test('the default warm-up has 32 quarter beats and the requested settings', () =
   assert.equal(DEFAULT_PROJECT.numerator, 4);
   assert.equal(DEFAULT_PROJECT.denominator, 4);
   assert.equal(DEFAULT_PROJECT.instrument, 'fluid');
-  assert.equal(DEFAULT_PROJECT.version, 2);
+  assert.equal(DEFAULT_PROJECT.version, 3);
   assert.ok(DEFAULT_PROJECT.notation.startsWith('TEMPO 90\nTSIG 4/4\n'));
   assert.equal(DEFAULT_PROJECT.backgroundOffset, 0);
+  assert.equal(DEFAULT_PROJECT.noteOffset, 0);
   assert.equal(DEFAULT_PROJECT.noteVolume, 70);
   assert.equal(DEFAULT_PROJECT.backgroundVolume, 65);
   assert.equal(DEFAULT_PROJECT.noteMuted, false);
@@ -31,6 +32,7 @@ test('JSON and .chroma round trips retain settings but never background audio', 
     numerator: 6,
     denominator: 8,
     instrument: 'vcsl',
+    noteOffset: 1.375,
     backgroundOffset: -2.125,
     noteVolume: 12,
     backgroundVolume: 81,
@@ -76,7 +78,7 @@ test('malformed files, unsupported versions, and foreign formats fail clearly', 
   for (const input of [null, [], 1, '1q', {}]) {
     assert.throws(() => parseProjectFile(JSON.stringify(input), 'bad.json'));
   }
-  for (const version of [0, 3, '1', null]) {
+  for (const version of [0, 4, '1', null]) {
     assert.throws(() => validateProject({ ...DEFAULT_PROJECT, version }), /version/);
   }
   assert.throws(() => validateProject({ ...DEFAULT_PROJECT, format: 'other-app' }), /not a ChromaPlay/);
@@ -98,7 +100,8 @@ test('autosave can restore an unfinished draft while still validating settings',
 
 test('numeric settings reject nonnumeric, nonfinite, out-of-range, and fractional integers', () => {
   const invalid = {
-    backgroundOffset: [-601, 601, '0', NaN, Infinity],
+    noteOffset: [-601, 601, '0', null, NaN, Infinity, -Infinity],
+    backgroundOffset: [-601, 601, '0', null, NaN, Infinity, -Infinity],
     noteVolume: [-1, 101, '70', NaN],
     backgroundVolume: [-1, 101, '65', Infinity],
   };
@@ -110,11 +113,12 @@ test('numeric settings reject nonnumeric, nonfinite, out-of-range, and fractiona
   assert.doesNotThrow(() => validateProject({
     ...DEFAULT_PROJECT,
     notation: 'TEMPO 30\nTSIG 32/16\n1q',
+    noteOffset: 600,
     backgroundOffset: -600,
     noteVolume: 0,
     backgroundVolume: 100,
   }));
-  assert.doesNotThrow(() => validateProject({ ...DEFAULT_PROJECT, notation: 'TEMPO 300\n1q', backgroundOffset: 600 }));
+  assert.doesNotThrow(() => validateProject({ ...DEFAULT_PROJECT, notation: 'TEMPO 300\n1q', noteOffset: -600, backgroundOffset: 600 }));
 });
 
 test('text and boolean fields enforce strict types and size limits', () => {
@@ -201,7 +205,7 @@ test('version 1 and unversioned settings migrate into headers without changing n
     const oldProject = { notation, tempo: 123, numerator: 6, denominator: 8 };
     if (version !== undefined) oldProject.version = version;
     const migrated = validateProject(oldProject);
-    assert.equal(migrated.version, 2);
+    assert.equal(migrated.version, 3);
     assert.equal(migrated.notation, `TEMPO 123\nTSIG 6/8\n${notation}`);
     assert.equal(migrated.tempo, 123);
     assert.equal(migrated.numerator, 6);
@@ -271,4 +275,83 @@ test('legacy numeric settings validate before migration', () => {
       assert.throws(() => validateProject({ version: 1, notation: '1q', [field]: value }), `${field}=${value}`);
     }
   }
+});
+
+test('version 2 projects keep their notation, sound, volumes, and track delay while adding zero note delay', () => {
+  const notation = '\n 1qL -3#h\t0e \n';
+  for (const instrument of ['synth', 'fluid', 'vcsl']) {
+    const oldProject = {
+      version: 2,
+      title: 'Saved practice',
+      notation,
+      instrument,
+      tempo: 120,
+      numerator: 6,
+      denominator: 8,
+      noteVolume: 23,
+      backgroundVolume: 47,
+      backgroundOffset: -2.25,
+    };
+    const restored = parseProjectFile(JSON.stringify(oldProject), 'version-2.chroma');
+    assert.equal(restored.version, 3);
+    assert.equal(restored.notation, notation);
+    assert.equal(restored.tempo, 60);
+    assert.equal(restored.numerator, 4);
+    assert.equal(restored.denominator, 4);
+    assert.equal(restored.instrument, instrument);
+    assert.equal(restored.noteVolume, 23);
+    assert.equal(restored.backgroundVolume, 47);
+    assert.equal(restored.backgroundOffset, -2.25);
+    assert.equal(restored.noteOffset, 0);
+    assert.deepEqual(parseProjectFile(serializeProject(restored), 'version-3.chroma'), restored);
+  }
+});
+
+test('version 2 and 3 drafts retain text exactly without reinserting removed headers', () => {
+  for (const version of [2, 3]) {
+    for (const notation of ['1q', 'TEMPO \nTSIG 6/\n1q -3#', 'TEMP 75\r\nTSIG 3/8\r\n1q']) {
+      const restored = validateProject({
+        ...DEFAULT_PROJECT, version, notation, tempo: 120, numerator: 6, denominator: 8, noteOffset: -1.5,
+      }, { allowInvalidNotation: true });
+      assert.equal(restored.version, 3);
+      assert.equal(restored.notation, notation);
+      assert.equal(restored.noteOffset, -1.5);
+      assert.deepEqual(validateProject(restored, { allowInvalidNotation: true }), restored);
+    }
+  }
+});
+
+test('both start delays round-trip independently, including negative, fractional, and limit values', () => {
+  for (const noteOffset of [-600, -2.125, 0, 1.375, 600]) {
+    for (const backgroundOffset of [-600, -3.25, 0, 4.875, 600]) {
+      const project = { ...DEFAULT_PROJECT, noteOffset, backgroundOffset };
+      const exported = serializeProject(project);
+      assert.equal(JSON.parse(exported).version, 3);
+      assert.deepEqual(parseProjectFile(exported, 'delays.chroma'), project);
+    }
+  }
+});
+
+test('plain text and older projects default note delay to zero without changing the track delay', () => {
+  for (const version of [undefined, 1, 2]) {
+    const oldProject = { notation: '1q', backgroundOffset: 2.5 };
+    if (version !== undefined) oldProject.version = version;
+    const restored = validateProject(oldProject);
+    assert.equal(restored.noteOffset, 0);
+    assert.equal(restored.backgroundOffset, 2.5);
+  }
+  const imported = parseProjectFile('TEMPO 75\nTSIG 3/4\n1q', 'notes.txt');
+  assert.equal(imported.noteOffset, 0);
+  assert.equal(imported.backgroundOffset, 0);
+});
+
+test('empty scores can retain track-only settings without exporting the uploaded audio', () => {
+  const project = validateProject({
+    ...DEFAULT_PROJECT, notation: '', noteOffset: 4, backgroundOffset: -1.5, backgroundVolume: 53,
+  });
+  const exported = serializeProject({ ...project, backgroundTrack: 'blob:local-track', waveform: [1, 0.5] });
+  assert.deepEqual(parseProjectFile(exported, 'track-only.chroma'), project);
+  assert.equal(project.tempo, 60);
+  assert.ok(!exported.includes('local-track'));
+  assert.ok(!exported.includes('waveform'));
 });

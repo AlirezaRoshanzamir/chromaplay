@@ -89,7 +89,7 @@ test('a positive backing offset delays its start and a negative offset seeks int
   let source = audio._context.nodes.find(node => node.kind === 'buffer');
   close(source.startTime, 2.035);
   close(source.offset, 0);
-  close(source.stops[0], 4.035);
+  close(source.stops[0], 62.035);
 
   await audio.play({ notes: score, bpm: 120, backgroundOffset: -1 });
   source = audio._context.nodes.filter(node => node.kind === 'buffer').at(-1);
@@ -129,7 +129,7 @@ test('seeking seeks backing audio relative to score time, and rests schedule no 
   close(note.startTime, 0.535);
 });
 
-test('stop cancels pending background and note sources, and the score ends exactly once', async t => {
+test('stop cancels pending sources and playback ends once after the longer backing track', async t => {
   let ends = 0;
   const audio = makeAudio(t, { onEnded: () => { ends += 1; } });
   await addBackground(audio);
@@ -146,9 +146,13 @@ test('stop cancels pending background and note sources, and the score ends exact
   await audio.play({ notes: score, bpm: 120 });
   audio._context.currentTime = 4.1;
   audio._tick();
+  assert.equal(audio.isPlaying, true);
+  assert.equal(ends, 0);
+  audio._context.currentTime = 60.1;
+  audio._tick();
   audio._tick();
   assert.equal(audio.isPlaying, false);
-  assert.equal(audio.getPosition(), 8);
+  assert.equal(audio.getPosition(), 120);
   assert.equal(ends, 1);
 });
 
@@ -163,6 +167,129 @@ test('a stop while AudioContext resumes cannot start stale playback', async t =>
   await pending;
   assert.equal(audio.isPlaying, false);
   assert.equal(context.nodes.length, 0);
+});
+
+test('independent note and backing offsets schedule on the same clock and resume a shifted held note', async t => {
+  const audio = makeAudio(t);
+  await addBackground(audio);
+  await audio.play({ notes: score, bpm: 120, noteOffset: 2, backgroundOffset: 1, includeLeadIn: true });
+  const context = audio._context;
+  const background = [...audio._voices].find(voice => voice.type === 'background');
+  close(background.source.startTime, 1.035);
+  assert.equal([...audio._voices].some(voice => voice.type === 'note'), false);
+  context.currentTime = 1.9;
+  audio._tick();
+  const note = [...audio._voices].find(voice => voice.type === 'note');
+  close(note.source.startTime, 2.035);
+  close(note.source.stops[0], 3.04);
+  context.currentTime = 2.535;
+  close(audio.pause(), 5);
+  await audio.play({ notes: score, bpm: 120, noteOffset: 2, backgroundOffset: 1, fromBeat: 5 });
+  const resumedNote = [...audio._voices].find(voice => voice.type === 'note');
+  const resumedBackground = [...audio._voices].find(voice => voice.type === 'background');
+  close(resumedNote.source.startTime, 2.57);
+  close(resumedNote.source.stops[0], 3.075);
+  close(resumedBackground.source.offset, 1.5);
+});
+
+test('notes can lead the backing track and the metronome moves with their score grid', async t => {
+  const audio = makeAudio(t);
+  await addBackground(audio);
+  audio.setMetronome(true);
+  await audio.play({ notes: score, bpm: 120, noteOffset: -2, backgroundOffset: 1, includeLeadIn: true });
+  const context = audio._context;
+  close(audio.getPosition(), -4);
+  close([...audio._voices].find(voice => voice.type === 'note').source.startTime, 0.035);
+  close([...audio._voices].find(voice => voice.type === 'click').source.startTime, 0.035);
+  close([...audio._voices].find(voice => voice.type === 'background').source.startTime, 3.035);
+  context.currentTime = 0.4;
+  audio._tick();
+  const clicks = [...audio._voices].filter(voice => voice.type === 'click');
+  close(clicks[1].source.startTime, 0.535);
+  audio.stop();
+  close(audio.getPosition(), -4);
+});
+
+test('seeking into the backing tail does not replay notes or continue the score metronome', async t => {
+  const audio = makeAudio(t);
+  await addBackground(audio);
+  audio.setMetronome(true);
+  await audio.play({ notes: score, bpm: 120, noteOffset: 1, backgroundOffset: -2, fromBeat: 15 });
+  close(audio.getPosition(), 15);
+  const voices = [...audio._voices];
+  assert.equal(voices.length, 1);
+  assert.equal(voices[0].type, 'background');
+  close(voices[0].source.offset, 9.5);
+  close(voices[0].source.stops[0], 50.535);
+  audio._context.currentTime = 0.5;
+  audio._tick();
+  assert.equal([...audio._voices].some(voice => voice.type === 'note' || voice.type === 'click'), false);
+  assert.equal(audio.isPlaying, true);
+});
+
+test('a backing-only timeline plays without waiting for a harmonica sound and stops at its own end', async t => {
+  let ends = 0;
+  const audio = makeAudio(t, { onEnded: () => { ends += 1; } });
+  await addBackground(audio);
+  audio._instrumentReady = new Promise(() => {});
+  audio.setMetronome(true);
+  await audio.play({ notes: [], bpm: 120, backgroundOffset: -2, includeLeadIn: true });
+  const voices = [...audio._voices];
+  assert.equal(voices.length, 1);
+  assert.equal(voices[0].type, 'background');
+  close(audio.getPosition(), -4);
+  close(voices[0].source.offset, 0);
+  close(voices[0].source.stops[0], 60.035);
+  audio._context.currentTime = 60.1;
+  audio._tick();
+  assert.equal(audio.isPlaying, false);
+  close(audio.getPosition(), 116);
+  assert.equal(ends, 1);
+});
+
+test('an entirely negative score range starts, clamps seeks, and finishes before timeline zero', async t => {
+  let ends = 0;
+  const audio = makeAudio(t, { onEnded: () => { ends += 1; } });
+  await audio.play({ notes: score, bpm: 120, noteOffset: -10, includeLeadIn: true });
+  assert.equal(audio.isPlaying, true);
+  close(audio.getPosition(), -20);
+  close([...audio._voices][0].source.startTime, 0.035);
+  audio._context.currentTime = 4.1;
+  audio._tick();
+  assert.equal(audio.isPlaying, false);
+  close(audio.getPosition(), -12);
+  assert.equal(ends, 1);
+  await audio.play({ notes: score, bpm: 120, noteOffset: -10, fromBeat: -50 });
+  close(audio.getPosition(), -20);
+  assert.equal(audio.isPlaying, true);
+  await audio.play({ notes: score, bpm: 120, noteOffset: -10, fromBeat: 100 });
+  close(audio.getPosition(), -12);
+  assert.equal(audio.isPlaying, false);
+});
+
+test('a shorter backing clip does not trim a later note clip and timeline inspection follows load/remove', async t => {
+  const audio = makeAudio(t);
+  assert.equal(audio.getBackgroundBuffer(), null);
+  assert.equal(audio.getInstrumentData(), null);
+  const before = audio.getTimeline({ notes: score, bpm: 120, noteOffset: 3, backgroundOffset: -100 });
+  assert.equal(before.startSeconds, 0);
+  assert.equal(before.endSeconds, 7);
+  await addBackground(audio);
+  assert.ok(audio.getBackgroundBuffer());
+  const loaded = audio.getTimeline({ notes: score, bpm: 120, noteOffset: 3, backgroundOffset: -59 });
+  assert.equal(loaded.startSeconds, -59);
+  assert.equal(loaded.endSeconds, 7);
+  await audio.play({ notes: score, bpm: 120, noteOffset: 3, backgroundOffset: -59 });
+  const background = [...audio._voices].find(voice => voice.type === 'background');
+  close(background.source.offset, 59);
+  close(background.source.stops[0], 1.035);
+  audio._context.currentTime = 2;
+  audio._tick();
+  assert.equal(audio.isPlaying, true);
+  audio.pause();
+  audio.clearBackground();
+  assert.equal(audio.getBackgroundBuffer(), null);
+  assert.equal(audio.getTimeline({ notes: score, bpm: 120, noteOffset: 3, backgroundOffset: -59 }).startSeconds, 0);
 });
 
 test('6/8 metronome pulses use eighth notes while tempo remains quarter-note BPM', async t => {

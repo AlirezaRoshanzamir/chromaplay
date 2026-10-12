@@ -1,7 +1,7 @@
 import { parseNotation } from './notation.js';
 
 export const DEFAULT_PROJECT = Object.freeze({
-  version: 2,
+  version: 3,
   title: 'Morning warm-up',
   notation: [
     'TEMPO 90',
@@ -15,6 +15,7 @@ export const DEFAULT_PROJECT = Object.freeze({
   numerator: 4,
   denominator: 4,
   instrument: 'fluid',
+  noteOffset: 0,
   backgroundOffset: 0,
   noteVolume: 70,
   backgroundVolume: 65,
@@ -72,8 +73,8 @@ export function validateProject(input, { allowInvalidNotation = false } = {}) {
   if (Object.hasOwn(input, 'format') && input.format !== PROJECT_FORMAT) {
     throw new Error('This file is not a ChromaPlay project.');
   }
-  if (Object.hasOwn(input, 'version') && ![1, 2].includes(input.version)) {
-    throw new Error('This project version is not supported. Use a version 1 or 2 project.');
+  if (Object.hasOwn(input, 'version') && ![1, 2, 3].includes(input.version)) {
+    throw new Error('This project version is not supported. Use a version 1, 2, or 3 project.');
   }
   if (!Object.hasOwn(input, 'notation') || typeof input.notation !== 'string') {
     throw new Error('The project must include notation as text.');
@@ -86,15 +87,16 @@ export function validateProject(input, { allowInvalidNotation = false } = {}) {
   for (const field of Object.keys(DEFAULT_PROJECT)) {
     project[field] = Object.hasOwn(input, field) ? input[field] : DEFAULT_PROJECT[field];
   }
-  project.version = 2;
-  project.notation = input.version === 2 ? input.notation : migrateLegacyNotation(input);
+  project.version = 3;
+  project.notation = input.version === 2 || input.version === 3 ? input.notation : migrateLegacyNotation(input);
   if (typeof project.title !== 'string' || project.title.length > 100) {
     throw new Error('The title must be text with 100 characters or fewer.');
   }
   if (!['synth', 'fluid', 'vcsl'].includes(project.instrument)) {
     throw new Error('Choose Synthesized reed, FluidR3 harmonica, or VCSL chromatic harmonica.');
   }
-  checkNumber(project.backgroundOffset, 'Background offset', -600, 600);
+  checkNumber(project.noteOffset, 'Notes start delay', -600, 600);
+  checkNumber(project.backgroundOffset, 'Track start delay', -600, 600);
   checkNumber(project.noteVolume, 'Note volume', 0, 100);
   checkNumber(project.backgroundVolume, 'Background volume', 0, 100);
   const booleanLabels = { metronome: 'Metronome', loop: 'Loop', noteMuted: 'Notes mute', backgroundMuted: 'Backing track mute' };

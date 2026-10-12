@@ -50,10 +50,32 @@ main{max-width:1440px;margin:auto;padding:39px max(5vw,24px) 0}.page-heading{dis
 
 /* The existing twelve holes double as a playable instrument. */
 .hole{min-width:0;padding:0;touch-action:none;user-select:none;-webkit-user-select:none}
-.playback-volumes{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px 32px;margin-top:16px}
-.playback-volumes .volume-row{margin-top:0}
-.playback-volumes .volume-row output{min-width:32px;font-variant-numeric:tabular-nums}
-@media(max-width:580px){.playback-volumes{grid-template-columns:minmax(0,1fr);gap:12px}}
+.waveform-timeline{--lane-controls-width:196px;margin-top:18px;min-width:0}
+.waveform-ruler-row,.waveform-lane{display:grid;grid-template-columns:var(--lane-controls-width) minmax(0,1fr)}
+.waveform-ruler-row>span{font-size:8px;letter-spacing:1.1px;color:#919d88;align-self:center;padding-left:12px}
+#waveform-ruler{display:block;width:100%;height:26px}
+.waveform-lane{border:1px solid #dce5d5;border-radius:7px;overflow:hidden;background:#f3f7ed;margin-top:7px}
+.track-lane{background:#edf3f4;border-color:#d8e2e4}
+.lane-controls{min-width:0;padding:12px;border-right:1px solid #dce5d5;background:#f9fbf5}
+.track-lane .lane-controls{border-color:#d8e2e4;background:#f6f9f9}
+.lane-heading{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.lane-heading strong{display:flex;align-items:center;gap:6px;font-size:11px;font-weight:600}
+.lane-heading strong svg{width:13px!important;height:13px!important}
+.lane-heading>span{font:10px monospace;color:#8a9780}
+.track-lane .lane-heading strong{color:#547580}
+.lane-filename{display:block;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;font-size:9px;color:#879b9f;margin-top:5px}
+.lane-controls .volume-row{margin-top:13px;gap:7px}
+.lane-controls .volume-row label{width:39px;font-size:9px}
+.lane-controls .volume-row output{min-width:30px;font-variant-numeric:tabular-nums}
+.lane-delay{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:12px}
+.lane-delay>label{font-size:9px;color:#839277}
+.lane-delay .offset-input{height:26px}
+.lane-delay input{width:50px;font-size:10px}
+.waveform-lane>canvas{display:block;align-self:stretch;width:100%;height:128px;min-width:0;touch-action:none;cursor:crosshair}
+.waveform-lane>canvas:focus-visible{outline:2px solid #65975a;outline-offset:-3px}
+.timeline-help,.timeline-empty{font-size:9px;color:#8b9782;line-height:1.6;margin:10px 0 0}
+.timeline-empty{padding:18px;border:1px dashed #dce5d5;border-radius:7px;text-align:center}
+@media(max-width:580px){.waveform-lane>canvas{height:148px}.waveform-timeline{--lane-controls-width:126px}.lane-controls{padding:10px 8px}.lane-heading{gap:4px}.lane-heading strong{font-size:10px}.lane-heading>span{font-size:9px}.lane-controls .volume-row{flex-wrap:wrap;gap:7px}.lane-controls .volume-row label{width:auto}.lane-controls .volume-row input{order:3;flex-basis:100%;margin-bottom:4px}.lane-controls .volume-row output{margin-left:auto}.lane-delay{gap:4px}.lane-delay>label{font-size:8px}.lane-delay .offset-input{padding-left:0;padding-right:4px;gap:0}.lane-delay input{width:38px}.timeline-help{font-size:9px}}
 .hole:hover{border-color:#a4ba98;background:#34423a}
 .hole.active.blow:hover{background:#b4edb1}.hole.active.draw:hover{background:#eab09a}
 .hole:focus-visible{outline:2px solid #c2e7b0;outline-offset:2px}
