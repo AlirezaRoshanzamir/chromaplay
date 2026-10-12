@@ -22,6 +22,7 @@ export class PracticeAudio {
     this.background = null;
     this.noteVolume = 0.7;
     this.backgroundVolume = 0.65;
+    this.metronomeVolume = 0.7;
     this.noteMuted = false;
     this.backgroundMuted = false;
     this.metronomeEnabled = false;
@@ -48,7 +49,8 @@ export class PracticeAudio {
   }
 
   getTimeline(options = {}) {
-    return createTimeline({ ...options, backgroundDuration: this._backgroundBuffer?.duration || 0 });
+    const { metronome = this.metronomeEnabled, ...timing } = options;
+    return createTimeline({ ...timing, metronome, backgroundDuration: this._backgroundBuffer?.duration || 0 });
   }
 
   /** Decoded audio is shared for waveform inspection; callers must not modify it. */
@@ -108,7 +110,7 @@ export class PracticeAudio {
     this._clickGain = context.createGain();
     this._noteGain.gain.value = this.noteMuted ? 0 : this.noteVolume;
     this._backgroundGain.gain.value = this.backgroundMuted ? 0 : this.backgroundVolume;
-    this._clickGain.gain.value = this.noteMuted ? 0 : 0.65 * this.noteVolume;
+    this._clickGain.gain.value = 0.65 * this.metronomeVolume;
     this._noteGain.connect(context.destination);
     this._backgroundGain.connect(context.destination);
     this._clickGain.connect(context.destination);
@@ -119,7 +121,7 @@ export class PracticeAudio {
     return context;
   }
 
-  async play({ notes = [], bpm, fromBeat = 0, noteOffset = 0, backgroundOffset = 0, includeLeadIn = false }) {
+  async play({ notes = [], bpm, fromBeat = 0, noteOffset = 0, backgroundOffset = 0, metronome = this.metronomeEnabled, metronomeOffset = 0 }) {
     this._cancelPlayback();
     const generation = this._generation;
     this._notes = [...(notes || [])].sort((a, b) => a.startBeat - b.startBeat);
@@ -128,25 +130,34 @@ export class PracticeAudio {
       this._notifyState();
       throw new Error('Tempo must be greater than zero.');
     }
-    this._timeline = this.getTimeline({ notes: this._notes, bpm: this._bpm, noteOffset, backgroundOffset });
+    this.metronomeEnabled = Boolean(metronome);
+    this._timeline = this.getTimeline({ notes: this._notes, bpm: this._bpm, noteOffset, backgroundOffset, metronomeOffset });
     this._totalBeats = this._timeline.endBeat;
     this._backgroundOffset = this._timeline.backgroundStartSeconds;
     const requestedBeat = Number.isFinite(Number(fromBeat)) ? Number(fromBeat) : 0;
     this._position = Math.min(this._totalBeats, Math.max(this._timeline.startBeat, requestedBeat));
-    if (includeLeadIn && requestedBeat === 0) this._position = this._timeline.startBeat;
     if (this._timeline.durationBeats <= 0 || this._position >= this._totalBeats) {
       this._notifyState();
       return;
     }
 
     const context = this._ensureContext();
-    await Promise.all([context.resume(), this._timeline.hasNotes ? this.prepareInstrument() : Promise.resolve()]);
+    const needsInstrument = this._notes.some(note => !note.isRest && note.endBeat + this._timeline.noteStartBeat > this._position);
+    await Promise.all([context.resume(), needsInstrument ? this.prepareInstrument() : Promise.resolve()]);
     // A pause, stop, or newer play request may arrive while the browser resumes audio.
     if (generation !== this._generation) return;
+    // Toggling the metronome while sound loads must also update the final bounds.
+    this._timeline = this.getTimeline({ notes: this._notes, bpm: this._bpm, noteOffset, backgroundOffset, metronomeOffset });
+    this._totalBeats = this._timeline.endBeat;
+    this._position = Math.min(this._position, this._totalBeats);
+    if (this._position >= this._totalBeats) {
+      this._notifyState();
+      return;
+    }
     this._startBeat = this._position;
     this._startTime = context.currentTime + START_DELAY_SECONDS;
     this._endTime = this._timeAtBeat(this._totalBeats);
-    this._noteEndTime = this._timeAtBeat(this._timeline.noteEndBeat);
+    this._metronomeEndTime = this._timeAtBeat(this._timeline.metronomeEndBeat);
     this._nextNoteIndex = this._notes.findIndex(note => note.endBeat + this._timeline.noteStartBeat > this._startBeat);
     if (this._nextNoteIndex < 0) this._nextNoteIndex = this._notes.length;
     this._resetClickCursor(this._startBeat);
@@ -234,7 +245,6 @@ export class PracticeAudio {
   setNoteVolume(value) {
     this.noteVolume = clampVolume(value);
     this._setGain(this._noteGain, this.noteMuted ? 0 : this.noteVolume);
-    this._setGain(this._clickGain, this.noteMuted ? 0 : 0.65 * this.noteVolume);
   }
 
   setBackgroundVolume(value) {
@@ -242,10 +252,14 @@ export class PracticeAudio {
     this._setGain(this._backgroundGain, this.backgroundMuted ? 0 : this.backgroundVolume);
   }
 
+  setMetronomeVolume(value) {
+    this.metronomeVolume = clampVolume(value);
+    this._setGain(this._clickGain, 0.65 * this.metronomeVolume);
+  }
+
   setNoteMuted(muted) {
     this.noteMuted = Boolean(muted);
     this._setGain(this._noteGain, this.noteMuted ? 0 : this.noteVolume);
-    this._setGain(this._clickGain, this.noteMuted ? 0 : 0.65 * this.noteVolume);
   }
 
   setBackgroundMuted(muted) {
@@ -257,7 +271,16 @@ export class PracticeAudio {
     this.metronomeEnabled = Boolean(enabled);
     this._cancelVoices('click');
     if (this.isPlaying) {
-      this._resetClickCursor(this.getPosition() + 0.001);
+      const position = this.getPosition();
+      this._timeline = this.getTimeline({ notes: this._notes, bpm: this._bpm,
+        noteOffset: this._timeline.noteStartSeconds, backgroundOffset: this._timeline.backgroundStartSeconds,
+        metronomeOffset: this._timeline.metronomeStartSeconds });
+      this._totalBeats = this._timeline.endBeat;
+      this._endTime = this._timeAtBeat(this._totalBeats);
+      this._metronomeEndTime = this._timeAtBeat(this._timeline.metronomeEndBeat);
+      clearTimeout(this._endTimer);
+      this._endTimer = setTimeout(() => this._tick(), Math.max(0, (this._endTime - this._context.currentTime) * 1000 + 10));
+      this._resetClickCursor(position + 0.001);
       this._tick();
     }
   }
@@ -288,8 +311,8 @@ export class PracticeAudio {
 
   _resetClickCursor(position) {
     const pulse = 4 / this.denominator;
-    const scorePosition = position - this._timeline.noteStartBeat;
-    this._nextClickBeat = Math.ceil(Math.max(0, scorePosition) / pulse - 1e-9) * pulse;
+    const metronomePosition = position - this._timeline.metronomeStartBeat;
+    this._nextClickBeat = Math.ceil(Math.max(0, metronomePosition) / pulse - 1e-9) * pulse;
   }
 
   _tick() {
@@ -313,10 +336,11 @@ export class PracticeAudio {
         this._scheduleNote(note.midi, Math.max(start, now + 0.003), end);
       }
     }
-    if (!this.metronomeEnabled || !this._timeline.hasNotes) return;
+    if (!this.metronomeEnabled || !this._timeline.hasMetronome) return;
     const pulse = 4 / this.denominator;
-    while (this._nextClickBeat < this._timeline.scoreBeats && this._timeAtBeat(this._timeline.noteStartBeat + this._nextClickBeat) <= horizon) {
-      const clickTime = this._timeAtBeat(this._timeline.noteStartBeat + this._nextClickBeat);
+    const metronomeBeats = this._timeline.metronomeDuration * this._bpm / 60;
+    while (this._nextClickBeat < metronomeBeats && this._timeAtBeat(this._timeline.metronomeStartBeat + this._nextClickBeat) <= horizon) {
+      const clickTime = this._timeAtBeat(this._timeline.metronomeStartBeat + this._nextClickBeat);
       const pulseIndex = Math.round(this._nextClickBeat / pulse);
       // If the browser throttles timers, skip missed clicks instead of bunching them together.
       if (clickTime >= now - 0.01) this._scheduleClick(Math.max(clickTime, now + 0.002), pulseIndex % this.numerator === 0);
@@ -387,7 +411,7 @@ export class PracticeAudio {
     gain.connect(this._clickGain);
     this._trackVoice(source, gain, 'click');
     source.start(start);
-    source.stop(Math.min(start + 0.07, this._noteEndTime));
+    source.stop(Math.min(start + 0.07, this._metronomeEndTime));
   }
 
   _scheduleBackground() {

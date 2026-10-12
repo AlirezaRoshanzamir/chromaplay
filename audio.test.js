@@ -97,23 +97,23 @@ test('a positive backing offset delays its start and a negative offset seeks int
   close(source.offset, 1);
 });
 
-test('negative backing offset adds a synchronized lead-in and can resume halfway through it', async t => {
+test('negative backing offset skips its prefix and legacy lead-in requests still begin at zero', async t => {
   const audio = makeAudio(t);
   await addBackground(audio);
   await audio.play({ notes: score, bpm: 120, backgroundOffset: -1, includeLeadIn: true });
   let source = audio._context.nodes.find(node => node.kind === 'buffer');
   close(source.startTime, 0.035);
-  close(source.offset, 0);
-  close(audio.getPosition(), -2);
-  assert.equal(audio._context.nodes.filter(node => node.kind === 'oscillator').length, 0);
+  close(source.offset, 1);
+  close(audio.getPosition(), 0);
+  assert.equal(audio._context.nodes.filter(node => node.kind === 'oscillator').length, 1);
   audio._context.currentTime = 0.535;
-  close(audio.pause(), -1);
+  close(audio.pause(), 1);
 
-  await audio.play({ notes: score, bpm: 120, fromBeat: -1, backgroundOffset: -1 });
+  await audio.play({ notes: score, bpm: 120, fromBeat: 1, backgroundOffset: -1 });
   source = audio._context.nodes.filter(node => node.kind === 'buffer').at(-1);
   close(source.startTime, 0.57);
-  close(source.offset, 0.5);
-  close(audio.getPosition(), -1);
+  close(source.offset, 1.5);
+  close(audio.getPosition(), 1);
 });
 
 test('seeking seeks backing audio relative to score time, and rests schedule no note voice', async t => {
@@ -192,42 +192,45 @@ test('independent note and backing offsets schedule on the same clock and resume
   close(resumedBackground.source.offset, 1.5);
 });
 
-test('notes can lead the backing track and the metronome moves with their score grid', async t => {
+test('negative note prefixes are skipped while the metronome uses its own positive offset', async t => {
   const audio = makeAudio(t);
   await addBackground(audio);
   audio.setMetronome(true);
-  await audio.play({ notes: score, bpm: 120, noteOffset: -2, backgroundOffset: 1, includeLeadIn: true });
+  await audio.play({ notes: score, bpm: 120, noteOffset: -2, backgroundOffset: 1, metronomeOffset: 0.5 });
   const context = audio._context;
-  close(audio.getPosition(), -4);
-  close([...audio._voices].find(voice => voice.type === 'note').source.startTime, 0.035);
-  close([...audio._voices].find(voice => voice.type === 'click').source.startTime, 0.035);
-  close([...audio._voices].find(voice => voice.type === 'background').source.startTime, 3.035);
+  close(audio.getPosition(), 0);
+  const note = [...audio._voices].find(voice => voice.type === 'note');
+  close(note.source.startTime, 0.035);
+  close(note.source.frequency.events[0].value, 440 * 2 ** ((62 - 69) / 12));
+  assert.equal([...audio._voices].some(voice => voice.type === 'click'), false);
+  close([...audio._voices].find(voice => voice.type === 'background').source.startTime, 1.035);
   context.currentTime = 0.4;
   audio._tick();
   const clicks = [...audio._voices].filter(voice => voice.type === 'click');
-  close(clicks[1].source.startTime, 0.535);
+  close(clicks[0].source.startTime, 0.535);
   audio.stop();
-  close(audio.getPosition(), -4);
+  close(audio.getPosition(), 0);
 });
 
-test('seeking into the backing tail does not replay notes or continue the score metronome', async t => {
+test('seeking into the backing tail keeps the independent metronome without replaying notes', async t => {
   const audio = makeAudio(t);
   await addBackground(audio);
   audio.setMetronome(true);
   await audio.play({ notes: score, bpm: 120, noteOffset: 1, backgroundOffset: -2, fromBeat: 15 });
   close(audio.getPosition(), 15);
   const voices = [...audio._voices];
-  assert.equal(voices.length, 1);
+  assert.equal(voices.length, 2);
   assert.equal(voices[0].type, 'background');
   close(voices[0].source.offset, 9.5);
   close(voices[0].source.stops[0], 50.535);
   audio._context.currentTime = 0.5;
   audio._tick();
-  assert.equal([...audio._voices].some(voice => voice.type === 'note' || voice.type === 'click'), false);
+  assert.equal([...audio._voices].some(voice => voice.type === 'note'), false);
+  assert.equal([...audio._voices].some(voice => voice.type === 'click'), true);
   assert.equal(audio.isPlaying, true);
 });
 
-test('a backing-only timeline plays without waiting for a harmonica sound and stops at its own end', async t => {
+test('a backing-only timeline supports metronome playback without waiting for a harmonica sound', async t => {
   let ends = 0;
   const audio = makeAudio(t, { onEnded: () => { ends += 1; } });
   await addBackground(audio);
@@ -235,35 +238,35 @@ test('a backing-only timeline plays without waiting for a harmonica sound and st
   audio.setMetronome(true);
   await audio.play({ notes: [], bpm: 120, backgroundOffset: -2, includeLeadIn: true });
   const voices = [...audio._voices];
-  assert.equal(voices.length, 1);
+  assert.equal(voices.length, 2);
   assert.equal(voices[0].type, 'background');
-  close(audio.getPosition(), -4);
-  close(voices[0].source.offset, 0);
-  close(voices[0].source.stops[0], 60.035);
+  close(audio.getPosition(), 0);
+  close(voices[0].source.offset, 2);
+  close(voices[0].source.stops[0], 58.035);
+  audio._context.currentTime = 58.1;
+  audio._tick();
+  assert.equal(audio.isPlaying, true);
   audio._context.currentTime = 60.1;
   audio._tick();
   assert.equal(audio.isPlaying, false);
-  close(audio.getPosition(), 116);
+  close(audio.getPosition(), 120);
   assert.equal(ends, 1);
 });
 
-test('an entirely negative score range starts, clamps seeks, and finishes before timeline zero', async t => {
+test('an entirely negative score is skipped and all seeks clamp to the nonnegative playable range', async t => {
   let ends = 0;
   const audio = makeAudio(t, { onEnded: () => { ends += 1; } });
   await audio.play({ notes: score, bpm: 120, noteOffset: -10, includeLeadIn: true });
-  assert.equal(audio.isPlaying, true);
-  close(audio.getPosition(), -20);
-  close([...audio._voices][0].source.startTime, 0.035);
-  audio._context.currentTime = 4.1;
-  audio._tick();
   assert.equal(audio.isPlaying, false);
-  close(audio.getPosition(), -12);
-  assert.equal(ends, 1);
-  await audio.play({ notes: score, bpm: 120, noteOffset: -10, fromBeat: -50 });
-  close(audio.getPosition(), -20);
+  close(audio.getPosition(), 0);
+  assert.equal(audio._context, null);
+  assert.equal(ends, 0);
+  await audio.play({ notes: score, bpm: 120, noteOffset: -0.5, fromBeat: -50 });
+  close(audio.getPosition(), 0);
   assert.equal(audio.isPlaying, true);
-  await audio.play({ notes: score, bpm: 120, noteOffset: -10, fromBeat: 100 });
-  close(audio.getPosition(), -12);
+  close([...audio._voices][0].source.stops[0], 0.54);
+  await audio.play({ notes: score, bpm: 120, noteOffset: -0.5, fromBeat: 100 });
+  close(audio.getPosition(), 7);
   assert.equal(audio.isPlaying, false);
 });
 
@@ -277,7 +280,7 @@ test('a shorter backing clip does not trim a later note clip and timeline inspec
   await addBackground(audio);
   assert.ok(audio.getBackgroundBuffer());
   const loaded = audio.getTimeline({ notes: score, bpm: 120, noteOffset: 3, backgroundOffset: -59 });
-  assert.equal(loaded.startSeconds, -59);
+  assert.equal(loaded.startSeconds, 0);
   assert.equal(loaded.endSeconds, 7);
   await audio.play({ notes: score, bpm: 120, noteOffset: 3, backgroundOffset: -59 });
   const background = [...audio._voices].find(voice => voice.type === 'background');
@@ -304,6 +307,79 @@ test('6/8 metronome pulses use eighth notes while tempo remains quarter-note BPM
   close(clicks[0].startTime, 0.035);
   close(clicks[1].startTime, 0.285);
   assert.ok(clicks[0].frequency.events[0].value > clicks[1].frequency.events[0].value, 'the first beat has a higher accent');
+});
+
+test('negative metronome offsets skip earlier pulses and preserve their grid when seeking', async t => {
+  const audio = makeAudio(t);
+  await audio.play({ notes: score, bpm: 120, noteOffset: 5, metronome: true, metronomeOffset: -0.25 });
+  const context = audio._context;
+  assert.equal(audio.getPosition(), 0);
+  assert.equal([...audio._voices].length, 0);
+  context.currentTime = 0.1;
+  audio._tick();
+  let click = [...audio._voices].find(voice => voice.type === 'click');
+  close(click.source.startTime, 0.285);
+  assert.equal(click.source.frequency.events[0].value, 1500, 'the skipped first pulse does not become a new bar accent');
+
+  await audio.play({ notes: score, bpm: 120, noteOffset: 5, metronome: true, metronomeOffset: -0.25, fromBeat: 4 });
+  close(audio.getPosition(), 4);
+  context.currentTime = 0.2;
+  audio._tick();
+  click = [...audio._voices].find(voice => voice.type === 'click');
+  close(click.source.startTime, 0.385);
+  assert.equal([...audio._voices].some(voice => voice.type === 'note'), false);
+});
+
+test('runtime metronome toggles update a delayed click tail without shifting the score clock', async t => {
+  let ends = 0;
+  const audio = makeAudio(t, { onEnded: () => { ends += 1; } });
+  await audio.play({ notes: score, bpm: 120, metronome: false, metronomeOffset: 2 });
+  const context = audio._context;
+  const startTime = audio._startTime;
+  close(audio._endTime, 4.035);
+  context.currentTime = 0.1;
+  const position = audio.getPosition();
+  audio.setMetronome(true);
+  close(audio.getPosition(), position);
+  close(audio._endTime, 6.035);
+  close(audio._startTime, startTime);
+  context.currentTime = 4.4;
+  audio._tick();
+  assert.equal(audio.isPlaying, true);
+  const click = [...audio._voices].find(voice => voice.type === 'click');
+  close(click.source.startTime, 4.535);
+  audio.setMetronome(false);
+  assert.equal(click.source.disconnected, true);
+  assert.equal(audio.isPlaying, false);
+  assert.equal(audio.getPosition(), 8);
+  assert.equal(ends, 1);
+});
+
+test('getTimeline uses the metronome setting by default while explicit play options can disable it', async t => {
+  const audio = makeAudio(t);
+  audio.setMetronome(true);
+  const timeline = audio.getTimeline({ notes: score, bpm: 120, metronomeOffset: 2 });
+  assert.equal(timeline.hasMetronome, true);
+  assert.equal(timeline.endSeconds, 6);
+  assert.equal(audio.getTimeline({ notes: score, bpm: 120, metronome: false, metronomeOffset: 2 }).endSeconds, 4);
+  await audio.play({ notes: score, bpm: 120, metronome: false, metronomeOffset: 2 });
+  assert.equal(audio.metronomeEnabled, false);
+  assert.equal([...audio._voices].some(voice => voice.type === 'click'), false);
+  close(audio._endTime, 4.035);
+});
+
+test('metronome changes while audio access is pending update the playback ending before it starts', async t => {
+  const audio = makeAudio(t);
+  const context = audio._ensureContext();
+  let resume;
+  context.resume = () => new Promise(resolve => { resume = resolve; });
+  const pending = audio.play({ notes: score, bpm: 120, metronome: true, metronomeOffset: 2 });
+  audio.setMetronome(false);
+  resume();
+  await pending;
+  close(audio._endTime, 4.035);
+  assert.equal(audio._timeline.hasMetronome, false);
+  assert.equal([...audio._voices].some(voice => voice.type === 'click'), false);
 });
 
 test('metronome transients have enough energy to remain distinct from the default sampled sound', async t => {
@@ -361,7 +437,8 @@ test('mute combinations change live sound without stopping or seeking either cha
     audio.setNoteMuted(noteMuted);
     audio.setBackgroundMuted(backgroundMuted);
     assert.equal(audio._noteGain.gain.events.at(-1).value, noteMuted ? 0 : 0.7);
-    assert.equal(audio._clickGain.gain.events.at(-1).value, noteMuted ? 0 : 0.65 * 0.7);
+    assert.equal(audio._clickGain.gain.value, 0.65 * 0.7);
+    assert.equal(audio._clickGain.gain.events.length, 0);
     assert.equal(audio._backgroundGain.gain.events.at(-1).value, backgroundMuted ? 0 : 0.65);
     assert.equal(audio.isPlaying, true);
     assert.equal(audio.metronomeEnabled, true);
@@ -387,7 +464,7 @@ test('muting before audio starts is honored and changing muted volumes stays sil
   await addBackground(audio);
   await audio.play({ notes: score, bpm: 120 });
   assert.equal(audio._noteGain.gain.value, 0);
-  assert.equal(audio._clickGain.gain.value, 0);
+  assert.equal(audio._clickGain.gain.value, 0.65 * 0.7);
   assert.equal(audio._backgroundGain.gain.value, 0);
   audio.setNoteVolume(0.45);
   audio.setBackgroundVolume(0.9);
@@ -398,7 +475,8 @@ test('muting before audio starts is honored and changing muted volumes stays sil
   audio.setNoteMuted(false);
   audio.setBackgroundMuted(false);
   assert.equal(audio._noteGain.gain.events.at(-1).value, 0.45);
-  assert.equal(audio._clickGain.gain.events.at(-1).value, 0.65 * 0.45);
+  assert.equal(audio._clickGain.gain.value, 0.65 * 0.7);
+  assert.equal(audio._clickGain.gain.events.length, 0);
   assert.equal(audio._backgroundGain.gain.events.at(-1).value, 0.9);
 });
 
@@ -414,9 +492,10 @@ test('notes mute controls an already held manual note without restarting it', as
   assert.equal(voice.source.stops.length, 0);
 });
 
-test('Notes volume scales both notes and metronome, with zero silent before startup and during playback', async t => {
+test('metronome volume is independent, supports silence, and changes live without seeking or restarting sources', async t => {
   const audio = makeAudio(t);
   audio.setNoteVolume(0);
+  audio.setMetronomeVolume(0);
   audio.setMetronome(true);
   assert.equal(audio._context, null);
   await addBackground(audio);
@@ -429,11 +508,12 @@ test('Notes volume scales both notes and metronome, with zero silent before star
   const stops = sources.map(source => [...source.stops]);
   const startTime = audio._startTime;
   const endTime = audio._endTime;
+  audio.setMetronomeVolume(0.4);
   context.currentTime = 0.535;
   for (const volume of [0.3, 0.8, 0]) {
     audio.setNoteVolume(volume);
     assert.equal(audio._noteGain.gain.events.at(-1).value, volume);
-    assert.equal(audio._clickGain.gain.events.at(-1).value, 0.65 * volume);
+    assert.equal(audio._clickGain.gain.events.at(-1).value, 0.65 * 0.4);
     assert.equal(audio._backgroundGain.gain.events.length, 0);
     assert.equal(audio.isPlaying, true);
     assert.equal(audio.metronomeEnabled, true);
@@ -442,6 +522,13 @@ test('Notes volume scales both notes and metronome, with zero silent before star
     close(audio.getPosition(), 1);
     assert.deepEqual(context.nodes, sources);
     assert.deepEqual(sources.map(source => source.stops), stops);
+  }
+  for (const volume of [0, 0.8, 1]) {
+    audio.setMetronomeVolume(volume);
+    assert.equal(audio._clickGain.gain.events.at(-1).value, 0.65 * volume);
+    assert.equal(audio._noteGain.gain.events.at(-1).value, 0);
+    assert.equal(audio._backgroundGain.gain.events.length, 0);
+    assert.deepEqual(context.nodes, sources);
   }
 });
 

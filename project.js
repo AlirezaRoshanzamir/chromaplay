@@ -1,7 +1,7 @@
 import { parseNotation } from './notation.js';
 
 export const DEFAULT_PROJECT = Object.freeze({
-  version: 3,
+  version: 4,
   title: 'Morning warm-up',
   notation: [
     'TEMPO 90',
@@ -17,8 +17,10 @@ export const DEFAULT_PROJECT = Object.freeze({
   instrument: 'fluid',
   noteOffset: 0,
   backgroundOffset: 0,
+  metronomeOffset: 0,
   noteVolume: 70,
   backgroundVolume: 65,
+  metronomeVolume: 70,
   noteMuted: false,
   backgroundMuted: false,
   metronome: false,
@@ -73,8 +75,8 @@ export function validateProject(input, { allowInvalidNotation = false } = {}) {
   if (Object.hasOwn(input, 'format') && input.format !== PROJECT_FORMAT) {
     throw new Error('This file is not a ChromaPlay project.');
   }
-  if (Object.hasOwn(input, 'version') && ![1, 2, 3].includes(input.version)) {
-    throw new Error('This project version is not supported. Use a version 1, 2, or 3 project.');
+  if (Object.hasOwn(input, 'version') && ![1, 2, 3, 4].includes(input.version)) {
+    throw new Error('This project version is not supported. Use a version 1, 2, 3, or 4 project.');
   }
   if (!Object.hasOwn(input, 'notation') || typeof input.notation !== 'string') {
     throw new Error('The project must include notation as text.');
@@ -87,8 +89,8 @@ export function validateProject(input, { allowInvalidNotation = false } = {}) {
   for (const field of Object.keys(DEFAULT_PROJECT)) {
     project[field] = Object.hasOwn(input, field) ? input[field] : DEFAULT_PROJECT[field];
   }
-  project.version = 3;
-  project.notation = input.version === 2 || input.version === 3 ? input.notation : migrateLegacyNotation(input);
+  project.version = 4;
+  project.notation = [2, 3, 4].includes(input.version) ? input.notation : migrateLegacyNotation(input);
   if (typeof project.title !== 'string' || project.title.length > 100) {
     throw new Error('The title must be text with 100 characters or fewer.');
   }
@@ -111,6 +113,14 @@ export function validateProject(input, { allowInvalidNotation = false } = {}) {
     if (project[`${channel}Muted`]) project[`${channel}Volume`] = 0;
     project[`${channel}Muted`] = false;
   }
+  // Earlier versions tied the click to the notes. Copy those settings once;
+  // current scores keep the metronome independent, even when a field is absent.
+  if (input.version !== 4) {
+    if (!Object.hasOwn(input, 'metronomeOffset')) project.metronomeOffset = project.noteOffset;
+    if (!Object.hasOwn(input, 'metronomeVolume')) project.metronomeVolume = project.noteVolume;
+  }
+  checkNumber(project.metronomeOffset, 'Metronome start delay', -600, 600);
+  checkNumber(project.metronomeVolume, 'Metronome volume', 0, 100);
 
   const parsed = parseNotation(project.notation);
   project.tempo = parsed.tempo;
